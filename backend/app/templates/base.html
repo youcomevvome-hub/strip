@@ -378,6 +378,10 @@
         .catch(() => {});
       toast('Scraping started…');
       showScrapeBanner();
+      // Move users to Review queue so they can see incoming drafts immediately.
+      if (location.pathname !== '/ui/queue') {
+        setTimeout(() => { location.href = '/ui/queue?scraping=1'; }, 120);
+      }
     });
 
     function scrapeBannerEl() {
@@ -432,9 +436,8 @@
         ).join('');
         if (j.state === 'done') {
           setTimeout(() => { b && b.remove(); }, 4000);
-          if (location.pathname === '/ui/queue' || location.pathname === '/ui/dashboard') {
-            setTimeout(() => location.reload(), 800);
-          }
+          if (location.pathname === '/ui/queue') setTimeout(() => location.reload(), 800);
+          else setTimeout(() => { location.href = '/ui/queue'; }, 800);
         } else {
           scrapePollTimer = setTimeout(pollScrape, 1500);
         }

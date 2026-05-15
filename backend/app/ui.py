@@ -390,6 +390,16 @@ def sources_scrape_all():
 @ui_router.get("/ui/queue", response_class=HTMLResponse)
 def queue_page(request: Request, db: Session = Depends(get_db)):
     posts = db.query(Post).filter_by(status="drafted").order_by(Post.created_at.desc()).all()
+    with _SCRAPE_LOCK:
+        scrape_snapshot = {
+            "state": SCRAPE_JOB["state"],
+            "started": SCRAPE_JOB["started"],
+            "finished": SCRAPE_JOB["finished"],
+            "total": SCRAPE_JOB["total"],
+            "done": SCRAPE_JOB["done"],
+            "current": SCRAPE_JOB["current"],
+            "results": list(SCRAPE_JOB["results"]),
+        }
     # Snapshot active publish jobs so the UI can resume the progress modal.
     with _JOB_LOCK:
         active_jobs = {
@@ -401,7 +411,7 @@ def queue_page(request: Request, db: Session = Depends(get_db)):
             if j["state"] == "running" or (j.get("finished") and time.time() - j["finished"] < 30)
         }
     return templates.TemplateResponse(
-        "queue.html", _ctx(request, db, posts=posts, active_jobs=active_jobs),
+        "queue.html", _ctx(request, db, posts=posts, active_jobs=active_jobs, scrape_job=scrape_snapshot),
     )
 
 

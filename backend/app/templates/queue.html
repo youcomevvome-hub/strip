@@ -30,6 +30,38 @@
 } %}
 
 {% block content %}
+  {% if scrape_job and (scrape_job.state != 'idle' or scrape_job.results) %}
+  <div class="card p-4 mb-5 anim-fade border border-wa-border">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="text-sm font-semibold">Latest scrape status</div>
+      {% if scrape_job.state == 'running' or scrape_job.state == 'starting' %}
+        <span class="pill pill-warn">Running</span>
+      {% elif scrape_job.state == 'done' %}
+        <span class="pill pill-ok">Done</span>
+      {% else %}
+        <span class="pill pill-off">{{ scrape_job.state }}</span>
+      {% endif %}
+    </div>
+    <div class="text-xs text-wa-muted mb-2">
+      {{ scrape_job.done or 0 }} / {{ scrape_job.total or 0 }} sources processed
+      {% if scrape_job.current %} · currently scraping {{ scrape_job.current }}{% endif %}
+    </div>
+    {% if scrape_job.results %}
+    <div class="space-y-1 text-xs">
+      {% for r in scrape_job.results %}
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span class="font-medium">{{ r.source }}</span>
+        <span class="text-wa-muted">fetched {{ r.fetched or 0 }}</span>
+        <span class="text-wa-muted">new {{ r.new or 0 }}</span>
+        <span class="text-wa-muted">drafted {{ r.drafted or 0 }}</span>
+        {% if r.error %}<span class="text-red-600">error: {{ r.error }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if not user %}
   <div class="card p-4 mb-5 anim-fade flex items-center gap-3 border border-wa-border">
     <svg class="w-5 h-5 text-wa-green"><use href="#i-user"/></svg>
@@ -199,6 +231,9 @@
       </div>
       <div class="font-medium text-wa-text">Nothing to review</div>
       <div class="text-sm">Add a source on <a class="text-wa-link hover:underline" href="/ui/sources">Sources</a> and hit “Scrape now”.</div>
+      {% if scrape_job and scrape_job.results %}
+      <div class="text-xs mt-2 text-wa-muted">Latest scrape finished, but no new drafts were created. Try broadening source keywords or adding more sources.</div>
+      {% endif %}
     </div>
   {% endif %}
 
