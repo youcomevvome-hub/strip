@@ -396,7 +396,13 @@ async def post_publish(pid: int, request: Request, db: Session = Depends(get_db)
 # ---------------- posts history ----------------
 @ui_router.get("/ui/posts", response_class=HTMLResponse)
 def posts_page(request: Request, db: Session = Depends(get_db)):
-    posts = db.query(Post).order_by(Post.created_at.desc()).limit(100).all()
+    posts = (
+        db.query(Post)
+        .filter(Post.status == "published")
+        .order_by(Post.created_at.desc())
+        .limit(200)
+        .all()
+    )
     return templates.TemplateResponse(
         "posts.html", _ctx(request, db, posts=posts),
     )
@@ -443,13 +449,25 @@ def post_publish_telegram(pid: int, request: Request, db: Session = Depends(get_
     if not p:
         raise HTTPException(404)
     try:
-        social.post_telegram(p)
-        if p.status == "drafted":
-            p.status = "published"
-            db.commit()
+        result = social.post_telegram(p, (p.variants or {}).get("telegram") or p.summary or p.title)
     except Exception as e:
         logger.exception("telegram publish failed for post %s: %s", pid, e)
-    referer = request.headers.get("referer") or "/ui/blog"
+        result = {"status": "error", "error": str(e)}
+    d = Delivery(
+        post_id=p.id, platform="telegram",
+        status=result.get("status", "error"),
+        external_id=result.get("external_id"),
+        external_url=result.get("external_url"),
+        error=result.get("error"),
+        delivered_at=datetime.utcnow() if result.get("status") == "ok" else None,
+    )
+    db.add(d)
+    if result.get("status") == "ok":
+        p.status = "published"
+        if p.article:
+            p.article.status = "published"
+    db.commit()
+    referer = request.headers.get("referer") or "/ui/posts"
     return RedirectResponse(referer, status_code=303)
 
 
