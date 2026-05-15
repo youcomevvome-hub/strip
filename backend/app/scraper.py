@@ -32,7 +32,9 @@ _DEFAULT_HEADERS = {
     "User-Agent": UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    # Avoid brotli (br) because environments without brotli decoding support can
+    # yield compressed/binary-looking gibberish in response.text.
+    "Accept-Encoding": "gzip, deflate",
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
     "Sec-Fetch-Dest": "document",
@@ -246,6 +248,9 @@ def _extract_article(url: str, html: str) -> ScrapedItem | None:
         soup_fb = BeautifulSoup(html, "lxml")
         paras = [p.get_text(" ", strip=True) for p in soup_fb.find_all("p")]
         text = "\n".join(p for p in paras if len(p) >= 30)
+    text = _normalize_text(text)
+    if _looks_garbled(text):
+        return None
     soup = BeautifulSoup(html, "lxml")
     title = (soup.title.string.strip() if soup.title and soup.title.string else url)
     if len(text) < 120:
@@ -287,6 +292,35 @@ def _is_relevant(item: ScrapedItem) -> bool:
     if _RELEVANCE_URL_RX.search(item.url):
         return True
     if len(item.text) >= 700:
+        return True
+    return False
+
+
+def _normalize_text(text: str) -> str:
+    t = (text or "").replace("\r", "\n")
+    # Drop zero-width and BOM-like artifacts that often show up in bad decodes.
+    t = t.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    # Collapse excessive whitespace.
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    return t.strip()
+
+
+def _looks_garbled(text: str) -> bool:
+    if not text:
+        return True
+    sample = text[:4000]
+    # Unicode replacement char usually indicates bad byte decoding.
+    replacement_ratio = sample.count("�") / max(len(sample), 1)
+    if replacement_ratio > 0.01:
+        return True
+    # Too many non-printable symbols is another strong signal.
+    bad = sum(1 for ch in sample if ord(ch) < 32 and ch not in "\n\t")
+    if bad / max(len(sample), 1) > 0.01:
+        return True
+    # If there are almost no letters/digits, it is likely compressed/binary junk.
+    useful = sum(1 for ch in sample if ch.isalnum())
+    if useful / max(len(sample), 1) < 0.20:
         return True
     return False
 
