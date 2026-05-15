@@ -194,16 +194,28 @@
 
         <nav class="flex-1 py-2 overflow-y-auto anim-stagger">
           {% set active = request.url.path %}
-          {% macro nav(href, icon, label) %}
+          {% macro nav(href, icon, label, badge=0) %}
             <a href="{{ href }}" class="nav-item flex items-stretch gap-3 py-3 pr-4 text-wa-text {% if active.startswith(href) %}active{% endif %}">
               <span class="nav-bar"></span>
-              <span class="w-6 h-6 ml-1 lg:ml-2 text-wa-iconfill flex items-center justify-center"><svg class="w-[22px] h-[22px]"><use href="#{{ icon }}"/></svg></span>
-              <span class="hidden lg:inline text-[15px]">{{ label }}</span>
+              <span class="relative w-6 h-6 ml-1 lg:ml-2 text-wa-iconfill flex items-center justify-center">
+                <svg class="w-[22px] h-[22px]"><use href="#{{ icon }}"/></svg>
+                {% if badge and badge > 0 and not active.startswith(href) %}
+                  <span class="absolute -top-0.5 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center ring-2 ring-white animate-pulse">
+                    {{ badge if badge < 100 else '99+' }}
+                  </span>
+                {% endif %}
+              </span>
+              <span class="hidden lg:inline text-[15px] flex-1">{{ label }}</span>
+              {% if badge and badge > 0 and not active.startswith(href) %}
+                <span class="hidden lg:inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold">
+                  {{ badge }}
+                </span>
+              {% endif %}
             </a>
           {% endmacro %}
           {{ nav('/ui/dashboard','i-dashboard','Dashboard') }}
           {{ nav('/ui/sources','i-globe','Sources') }}
-          {{ nav('/ui/queue','i-queue','Review queue') }}
+          {{ nav('/ui/queue','i-queue','Review queue', pending_count or 0) }}
           {{ nav('/ui/blog','i-book','Blog') }}
           {{ nav('/ui/posts','i-send','Published') }}
           {{ nav('/ui/settings','i-settings','Settings') }}

@@ -103,11 +103,18 @@ def _configured_platforms() -> dict:
 
 def _ctx(request: Request, db: Session | None = None, **extra) -> dict:
     user = _current_user(request, db) if db is not None else None
+    pending_count = 0
+    if db is not None:
+        try:
+            pending_count = db.query(Post).filter_by(status="drafted").count()
+        except Exception:
+            pending_count = 0
     return {
         "request": request,
         "user": user,
         "platforms": social.PLATFORM_KEYS,
         "configured": _configured_platforms(),
+        "pending_count": pending_count,
         **extra,
     }
 
