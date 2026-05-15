@@ -1,0 +1,335 @@
+{# WhatsApp-styled shell. No build step — Tailwind via CDN with a custom config. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Strip{% endblock %} · Strip</title>
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300a884'%3E%3Cpath d='M12 2a10 10 0 1 0 5.3 18.4L22 22l-1.6-4.7A10 10 0 0 0 12 2z'/%3E%3C/svg%3E">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            wa: {
+              green:    '#00a884',
+              dark:     '#008069',
+              darker:   '#00604a',
+              bright:   '#25d366',
+              bubble:   '#d9fdd3',
+              bgpanel:  '#f0f2f5',
+              bgchat:   '#efeae2',
+              border:   '#e9edef',
+              text:     '#111b21',
+              muted:    '#54656f',
+              iconfill: '#54656f',
+              link:     '#027eb5',
+              danger:   '#ea4335',
+            }
+          },
+          fontFamily: {
+            wa: ['"Segoe UI Historic"','"Segoe UI"','"Helvetica Neue"','Helvetica','"Lucida Grande"','Arial','Ubuntu','Cantarell','"Fira Sans"','sans-serif'],
+          },
+          boxShadow: {
+            wa: '0 1px 1px rgba(11,20,26,.13), 0 0 1px rgba(11,20,26,.08)',
+            walg: '0 12px 24px rgba(11,20,26,.10), 0 2px 6px rgba(11,20,26,.06)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    html, body { background:#d1d7db; }
+    body { font-family: "Segoe UI Historic","Segoe UI","Helvetica Neue",Helvetica,"Lucida Grande",Arial,sans-serif; color:#111b21; }
+    /* WhatsApp's iconic chat background pattern: subtle dotted texture */
+    .wa-chat-bg {
+      background-color: #efeae2;
+      background-image:
+        radial-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+        radial-gradient(rgba(0,0,0,0.03) 1px, transparent 1px);
+      background-size: 22px 22px;
+      background-position: 0 0, 11px 11px;
+    }
+    /* App header band (visible above the white shell) */
+    .wa-band { background:#00a884; height:127px; }
+    /* Scrollbars */
+    ::-webkit-scrollbar { width:8px; height:8px; }
+    ::-webkit-scrollbar-thumb { background:#cbd0d3; border-radius:4px; }
+    ::-webkit-scrollbar-thumb:hover { background:#a9b0b4; }
+    /* Animations */
+    @keyframes wa-fade { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+    @keyframes wa-slide { from { transform: translateX(12px); opacity:0; } to { transform:none; opacity:1; } }
+    @keyframes wa-pop  { 0%{transform:scale(.96);opacity:0} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1)} }
+    @keyframes wa-spin { to { transform: rotate(360deg); } }
+    @keyframes wa-logo-spin {
+      0%   { transform: rotate(0deg)    scale(1); }
+      20%  { transform: rotate(180deg)  scale(1.08); }
+      40%  { transform: rotate(540deg)  scale(1); }
+      55%  { transform: rotate(540deg)  scale(1); }
+      70%  { transform: rotate(180deg)  scale(1.08); }
+      85%  { transform: rotate(-90deg)  scale(1); }
+      100% { transform: rotate(0deg)    scale(1); }
+    }
+    .anim-fade  { animation: wa-fade .35s ease both; }
+    .anim-slide { animation: wa-slide .35s ease both; }
+    .anim-pop   { animation: wa-pop .25s ease both; }
+    .anim-spin  { animation: wa-spin 1s linear infinite; }
+    .anim-logo-spin { animation: wa-logo-spin 6s ease-in-out infinite; transform-origin: 50% 50%; }
+    .anim-stagger > * { animation: wa-fade .45s ease both; }
+    .anim-stagger > *:nth-child(1) { animation-delay: .02s; }
+    .anim-stagger > *:nth-child(2) { animation-delay: .06s; }
+    .anim-stagger > *:nth-child(3) { animation-delay: .10s; }
+    .anim-stagger > *:nth-child(4) { animation-delay: .14s; }
+    .anim-stagger > *:nth-child(5) { animation-delay: .18s; }
+    .anim-stagger > *:nth-child(6) { animation-delay: .22s; }
+    .anim-stagger > *:nth-child(7) { animation-delay: .26s; }
+    .anim-stagger > *:nth-child(8) { animation-delay: .30s; }
+    .anim-stagger > *:nth-child(9) { animation-delay: .34s; }
+    .anim-stagger > *:nth-child(n+10) { animation-delay: .38s; }
+    /* Nav active indicator */
+    .nav-item { transition: background-color .15s ease, color .15s ease; }
+    .nav-item:hover { background:#f0f2f5; }
+    .nav-item.active { background:#f0f2f5; }
+    .nav-item.active .nav-bar { background:#00a884; }
+    .nav-bar { width:3px; align-self:stretch; border-radius:0 2px 2px 0; background:transparent; }
+    /* Buttons */
+    .btn { display:inline-flex; align-items:center; gap:.5rem; padding:.55rem 1rem; border-radius:24px; font-weight:500; transition:transform .08s ease, background-color .15s ease, box-shadow .15s ease; }
+    .btn:active { transform: scale(.97); }
+    .btn-primary { background:#00a884; color:white; }
+    .btn-primary:hover { background:#008069; }
+    .btn-ghost { color:#54656f; }
+    .btn-ghost:hover { background:#f0f2f5; }
+    .btn-danger { color:#ea4335; }
+    .btn-danger:hover { background:#fde8e6; }
+    /* Cards */
+    .card { background:white; border-radius:14px; box-shadow: 0 1px 1px rgba(11,20,26,.08); }
+    /* Inputs */
+    .field { width:100%; padding:.65rem .9rem; border:1px solid #e9edef; border-radius:10px; background:#f7f8f9; transition: border-color .15s ease, background .15s ease; }
+    .field:focus { outline:none; background:white; border-color:#00a884; box-shadow: 0 0 0 3px rgba(0,168,132,.15); }
+    /* Toggle switch */
+    .switch { position:relative; width:38px; height:22px; background:#cfd5d8; border-radius:999px; transition:background .15s ease; cursor:pointer; }
+    .switch input { display:none; }
+    .switch .knob { position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:999px; background:white; transition:left .18s ease, background .15s ease; box-shadow:0 1px 2px rgba(0,0,0,.2); }
+    .switch.on { background:#00a884; }
+    .switch.on .knob { left:18px; }
+    /* Status pill */
+    .pill { display:inline-flex; align-items:center; gap:.35rem; padding:.15rem .55rem; border-radius:999px; font-size:.72rem; font-weight:600; }
+    .pill-ok { background:#dcfce7; color:#15803d; }
+    .pill-warn { background:#fef3c7; color:#92400e; }
+    .pill-off { background:#f0f2f5; color:#54656f; }
+    .pill-danger { background:#fde8e6; color:#b42318; }
+    /* Tooltip-ish title hover already free with title attr */
+  </style>
+
+  <!-- Inline SVG icon sprite (flat 1-line icons, no 3D) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></symbol>
+      <symbol id="i-globe"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+      <symbol id="i-queue"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="20" cy="18" r="2"/></symbol>
+      <symbol id="i-send"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l18-8-8 18-2-8-8-2z"/></symbol>
+      <symbol id="i-settings"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.4 17l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 4.4l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.6 7l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></symbol>
+      <symbol id="i-plus"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-trash"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m1 0l-1 14a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2L7 6"/></symbol>
+      <symbol id="i-refresh"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></symbol>
+      <symbol id="i-check"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></symbol>
+      <symbol id="i-x"         viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-link"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></symbol>
+      <symbol id="i-search"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></symbol>
+      <symbol id="i-logout"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-user"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+      <symbol id="i-lock"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+      <symbol id="i-spark"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></symbol>
+      <!-- Social (line style) -->
+      <symbol id="i-twitter"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 5.8a8.5 8.5 0 0 1-2.4.7 4.2 4.2 0 0 0 1.8-2.3 8.4 8.4 0 0 1-2.7 1A4.2 4.2 0 0 0 12 9a12 12 0 0 1-8.7-4.4 4.2 4.2 0 0 0 1.3 5.6 4.2 4.2 0 0 1-1.9-.5v.1a4.2 4.2 0 0 0 3.4 4.1 4.2 4.2 0 0 1-1.9.1 4.2 4.2 0 0 0 3.9 2.9A8.5 8.5 0 0 1 2 18.5 12 12 0 0 0 8.5 20c7.8 0 12-6.5 12-12v-.5A8.5 8.5 0 0 0 22 5.8z"/></symbol>
+      <symbol id="i-linkedin"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 10v8M8 7v.01M12 18v-4a2 2 0 0 1 4 0v4M12 10v8"/></symbol>
+      <symbol id="i-facebook"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V7a2 2 0 0 1 2-2h2M10 22V10m0 0H8m2 0h4"/></symbol>
+      <symbol id="i-instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r=".5" fill="currentColor"/></symbol>
+      <symbol id="i-whatsapp"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0-7.7 13.7L3 21l4.4-1.2A9 9 0 1 0 12 3z"/><path d="M8.5 9.5c.3 2 2 3.7 4 4 .5 0 1.5-.3 1.7-.9.2-.5-.6-1-1-1.2-.5-.2-1 .5-1.3.3-.6-.3-1.4-1-1.7-1.7-.2-.3.5-.8.3-1.3-.2-.4-.7-1.2-1.2-1-.6.2-.9 1.2-.8 1.8z"/></symbol>
+      <symbol id="i-reddit"    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><circle cx="20" cy="5" r="2"/><circle cx="9" cy="13" r="1" fill="currentColor"/><circle cx="15" cy="13" r="1" fill="currentColor"/><path d="M9 17c1 .7 2 1 3 1s2-.3 3-1"/></symbol>
+      <symbol id="i-telegram"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 4L3 11l6 2 2 6 4-4 4 3 2-14z"/></symbol>
+      <symbol id="i-discord"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8c2-1 8-1 10 0M7 16c2 1 8 1 10 0M5 6c-2 4-2 8 0 12 1 .5 3 1 3 1l1-2M19 6c2 4 2 8 0 12-1 .5-3 1-3 1l-1-2"/></symbol>
+      <symbol id="i-mastodon"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6c0-1 1-2 3-2h8c2 0 3 1 3 2v8c0 2-2 3-4 3l-2 3-2-3c-2 0-4-1-4-3V6z"/><path d="M9 13V8M15 13V8M12 13V10"/></symbol>
+      <symbol id="i-rss"       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.5" fill="currentColor"/></symbol>
+      <!-- Content-kind icons (1-line) -->
+      <symbol id="i-doc"        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h6"/></symbol>
+      <symbol id="i-cap"        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9l10-5 10 5-10 5L2 9z"/><path d="M6 11v4c0 1.5 3 3 6 3s6-1.5 6-3v-4M22 9v5"/></symbol>
+      <symbol id="i-briefcase"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18"/></symbol>
+      <symbol id="i-trophy"     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M5 4H3v2a3 3 0 0 0 3 3M19 4h2v2a3 3 0 0 1-3 3M9 19h6M12 14v5"/></symbol>
+      <symbol id="i-calendar"   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></symbol>
+      <symbol id="i-cash"       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 10v.01M18 14v.01"/></symbol>
+      <symbol id="i-book"       viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h7a3 3 0 0 1 3 3v14a2 2 0 0 0-2-2H4z"/><path d="M20 4h-7a3 3 0 0 0-3 3v14a2 2 0 0 1 2-2h8z"/></symbol>
+      <symbol id="i-megaphone"  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l8 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M18 8a4 4 0 0 1 0 8"/></symbol>
+      <symbol id="i-share"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></symbol>
+      <symbol id="i-heart"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></symbol>
+      <symbol id="i-eye"        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-image"      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></symbol>
+      <symbol id="i-pin"        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-7 7-12a7 7 0 0 0-14 0c0 5 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+    </defs>
+  </svg>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="font-wa text-wa-text">
+  <div class="wa-band fixed top-0 inset-x-0 z-0"></div>
+
+  <div class="relative z-10 mx-auto max-w-[1600px] h-screen p-0 md:p-4 lg:p-6">
+    <div class="bg-white shadow-walg md:rounded-md overflow-hidden flex h-full">
+
+      <!-- Sidebar -->
+      <aside class="w-[68px] lg:w-[280px] border-r border-wa-border flex flex-col bg-white">
+        <div class="h-[60px] flex items-center px-3 lg:px-5 border-b border-wa-border bg-wa-bgpanel">
+          <div class="w-9 h-9 rounded-full bg-wa-green text-white flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 anim-logo-spin"><use href="#i-spark"/></svg>
+          </div>
+          <div class="ml-3 hidden lg:block">
+            <div class="font-semibold leading-tight">Strip</div>
+            <div class="text-[11px] text-wa-muted">AI content stripper</div>
+          </div>
+        </div>
+
+        <nav class="flex-1 py-2 overflow-y-auto anim-stagger">
+          {% set active = request.url.path %}
+          {% macro nav(href, icon, label) %}
+            <a href="{{ href }}" class="nav-item flex items-stretch gap-3 py-3 pr-4 text-wa-text {% if active.startswith(href) %}active{% endif %}">
+              <span class="nav-bar"></span>
+              <span class="w-6 h-6 ml-1 lg:ml-2 text-wa-iconfill flex items-center justify-center"><svg class="w-[22px] h-[22px]"><use href="#{{ icon }}"/></svg></span>
+              <span class="hidden lg:inline text-[15px]">{{ label }}</span>
+            </a>
+          {% endmacro %}
+          {{ nav('/ui/dashboard','i-dashboard','Dashboard') }}
+          {{ nav('/ui/sources','i-globe','Sources') }}
+          {{ nav('/ui/queue','i-queue','Review queue') }}
+          {{ nav('/ui/blog','i-book','Blog') }}
+          {{ nav('/ui/posts','i-send','Published') }}
+          {{ nav('/ui/settings','i-settings','Settings') }}
+        </nav>
+
+        <div class="border-t border-wa-border p-3">
+          {% if user %}
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-full bg-wa-green text-white flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5"><use href="#i-user"/></svg>
+            </div>
+            <div class="hidden lg:block min-w-0 flex-1">
+              <div class="text-sm font-medium truncate">{{ user.email }}</div>
+              <div class="text-[11px] text-wa-muted">Signed in</div>
+            </div>
+            <a href="/ui/logout" class="text-wa-muted hover:text-wa-text" title="Sign out">
+              <svg class="w-5 h-5"><use href="#i-logout"/></svg>
+            </a>
+          </div>
+          {% else %}
+          <a href="/ui/signin" class="flex items-center gap-3 py-1 hover:bg-wa-bgpanel rounded-md">
+            <div class="w-9 h-9 rounded-full bg-wa-bgpanel text-wa-iconfill flex items-center justify-center">
+              <svg class="w-5 h-5"><use href="#i-user"/></svg>
+            </div>
+            <div class="hidden lg:block">
+              <div class="text-sm font-medium">Sign in</div>
+              <div class="text-[11px] text-wa-muted">Optional, needed to post to social</div>
+            </div>
+          </a>
+          {% endif %}
+        </div>
+      </aside>
+
+      <!-- Main panel -->
+      <main class="flex-1 flex flex-col min-w-0 wa-chat-bg">
+        <header class="h-[60px] bg-wa-bgpanel border-b border-wa-border flex items-center px-4 lg:px-6 gap-3">
+          <div class="font-medium text-[16px]">{% block header %}{{ self.title() }}{% endblock %}</div>
+          <div class="flex-1"></div>
+          {% block header_actions %}{% endblock %}
+        </header>
+
+        <div class="flex-1 overflow-y-auto">
+          <div class="max-w-6xl mx-auto p-4 lg:p-8 anim-fade">
+            {% block content %}{% endblock %}
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // Toggle switches (progressive enhancement)
+    document.addEventListener('change', (e) => {
+      if (e.target.matches('.switch input[type=checkbox]')) {
+        e.target.parentElement.classList.toggle('on', e.target.checked);
+        const form = e.target.closest('form');
+        if (form && form.dataset.submitOnChange !== undefined) form.submit();
+      }
+    });
+    // Initialize switch state from checkbox
+    document.querySelectorAll('.switch input[type=checkbox]').forEach(c => {
+      c.parentElement.classList.toggle('on', c.checked);
+    });
+
+    // ---------------- Share modal (shared across queue + blog) ----------------
+    window.openShare = function(postId, title) {
+      const url = window.location.origin + "/p/" + postId;
+      const t = encodeURIComponent(title || "");
+      const u = encodeURIComponent(url);
+      const intents = [
+        { k: 'twitter',  label: 'Twitter / X', icon: 'i-twitter',  href: `https://twitter.com/intent/tweet?text=${t}&url=${u}` },
+        { k: 'linkedin', label: 'LinkedIn',    icon: 'i-linkedin', href: `https://www.linkedin.com/sharing/share-offsite/?url=${u}` },
+        { k: 'facebook', label: 'Facebook',    icon: 'i-facebook', href: `https://www.facebook.com/sharer/sharer.php?u=${u}` },
+        { k: 'whatsapp', label: 'WhatsApp',    icon: 'i-whatsapp', href: `https://wa.me/?text=${t}%20${u}` },
+        { k: 'telegram', label: 'Telegram',    icon: 'i-telegram', href: `https://t.me/share/url?url=${u}&text=${t}` },
+        { k: 'reddit',   label: 'Reddit',      icon: 'i-reddit',   href: `https://www.reddit.com/submit?url=${u}&title=${t}` },
+      ];
+      const back = document.getElementById('share-modal');
+      const grid = document.getElementById('share-grid');
+      const linkInput = document.getElementById('share-link');
+      linkInput.value = url;
+      grid.innerHTML = intents.map(i => `
+        <a href="${i.href}" target="_blank" rel="noopener"
+           class="flex items-center gap-3 p-3 rounded-lg border border-wa-border hover:bg-wa-bgpanel transition">
+          <svg class="w-5 h-5 text-wa-iconfill"><use href="#${i.icon}"/></svg>
+          <span class="text-sm">${i.label}</span>
+        </a>`).join('');
+      back.classList.remove('hidden');
+      back.classList.add('flex');
+    };
+    window.closeShare = function() {
+      const back = document.getElementById('share-modal');
+      back.classList.add('hidden');
+      back.classList.remove('flex');
+    };
+    window.copyShareLink = function() {
+      const linkInput = document.getElementById('share-link');
+      linkInput.select();
+      try { navigator.clipboard.writeText(linkInput.value); } catch(e) {}
+      const btn = document.getElementById('share-copy-btn');
+      const old = btn.textContent; btn.textContent = 'Copied!';
+      setTimeout(() => btn.textContent = old, 1200);
+    };
+  </script>
+
+  <!-- Share modal -->
+  <div id="share-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/40 p-4" onclick="if(event.target===this) closeShare()">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-wa-border">
+        <div class="font-semibold">Share this post</div>
+        <button class="text-wa-muted hover:text-wa-text" onclick="closeShare()">
+          <svg class="w-5 h-5"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div class="grid grid-cols-2 gap-2" id="share-grid"></div>
+        <div>
+          <label class="text-xs text-wa-muted">Public link</label>
+          <div class="flex gap-2 mt-1">
+            <input id="share-link" type="text" readonly class="flex-1 px-3 py-2 border border-wa-border rounded-lg bg-wa-bgpanel text-sm">
+            <button id="share-copy-btn" type="button" onclick="copyShareLink()" class="btn btn-primary">Copy</button>
+          </div>
+          <p class="text-[11px] text-wa-muted mt-2">Anyone who opens this link sees the post (title, image, key info, and apply button).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

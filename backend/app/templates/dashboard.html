@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block header_actions %}
+  <a href="/ui/sources" class="btn btn-ghost"><svg class="w-4 h-4"><use href="#i-plus"/></svg>Add source</a>
+  <form action="/ui/sources/scrape-all" method="post">
+    <button class="btn btn-primary"><svg class="w-4 h-4"><use href="#i-refresh"/></svg>Scrape now</button>
+  </form>
+{% endblock %}
+
+{% block content %}
+  {# Hero #}
+  <div class="card p-6 lg:p-8 mb-6 anim-fade overflow-hidden relative">
+    <div class="absolute -right-10 -top-10 w-64 h-64 rounded-full bg-wa-green/10"></div>
+    <div class="absolute right-20 top-20 w-24 h-24 rounded-full bg-wa-bright/10"></div>
+    <div class="relative">
+      <div class="flex items-center gap-2 text-wa-green text-sm font-semibold mb-2">
+        <svg class="w-4 h-4"><use href="#i-spark"/></svg>
+        <span>Auto-detect mode active</span>
+      </div>
+      <h1 class="text-2xl lg:text-3xl font-semibold mb-2">Strip the web. Publish everywhere.</h1>
+      <p class="text-wa-muted max-w-2xl">
+        Add a website. Strip figures out the best way to read it (RSS, HTML, or headless browser),
+        the AI structures every article into post-ready content, and you validate before it goes out.
+        No sign-in needed to browse or review. Sign in only when you're ready to publish to social.
+      </p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        <a href="/ui/sources" class="btn btn-primary"><svg class="w-4 h-4"><use href="#i-plus"/></svg>Add a source</a>
+        <a href="/ui/queue" class="btn btn-ghost"><svg class="w-4 h-4"><use href="#i-queue"/></svg>Review queue</a>
+        <a href="/rss" class="btn btn-ghost" target="_blank"><svg class="w-4 h-4"><use href="#i-rss"/></svg>RSS feed</a>
+      </div>
+    </div>
+  </div>
+
+  {# Stat cards #}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 anim-stagger">
+    {% set tiles = [
+      ('Sources', stats.sources, 'i-globe', 'text-wa-green'),
+      ('To review', stats.pending, 'i-queue', 'text-amber-600'),
+      ('Published', stats.published, 'i-send', 'text-wa-dark'),
+      ('Articles', stats.articles, 'i-link', 'text-slate-600'),
+    ] %}
+    {% for label, value, icon, tone in tiles %}
+    <div class="card p-5 hover:shadow-walg transition-shadow">
+      <div class="flex items-center justify-between">
+        <span class="text-wa-muted text-sm">{{ label }}</span>
+        <span class="{{ tone }}"><svg class="w-5 h-5"><use href="#{{ icon }}"/></svg></span>
+      </div>
+      <div class="text-3xl font-semibold mt-2">{{ value }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="grid lg:grid-cols-2 gap-6 anim-fade">
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-medium">Recent sources</div>
+        <a href="/ui/sources" class="text-wa-link text-sm hover:underline">View all</a>
+      </div>
+      {% if recent_sources %}
+        <ul class="divide-y divide-wa-border">
+          {% for s in recent_sources %}
+          <li class="py-2.5 flex items-center gap-3">
+            <div class="w-8 h-8 rounded-md bg-wa-bubble text-wa-dark flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4"><use href="#i-globe"/></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium truncate">{{ s.name }}</div>
+              <div class="text-xs text-wa-muted truncate">{{ s.url|domain }}</div>
+            </div>
+            {% if s.enabled %}<span class="pill pill-ok">live</span>{% else %}<span class="pill pill-off">paused</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="text-sm text-wa-muted py-6 text-center">No sources yet. <a class="text-wa-link hover:underline" href="/ui/sources">Add your first</a>.</div>
+      {% endif %}
+    </div>
+
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-medium">Latest drafts</div>
+        <a href="/ui/queue" class="text-wa-link text-sm hover:underline">Open queue</a>
+      </div>
+      {% if recent_posts %}
+        <ul class="divide-y divide-wa-border">
+          {% for p in recent_posts %}
+          <li class="py-2.5 flex items-start gap-3">
+            <div class="w-9 h-9 rounded-md bg-wa-bubble text-wa-dark flex items-center justify-center shrink-0">
+              <svg class="w-4 h-4"><use href="#i-spark"/></svg>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="font-medium truncate">{{ p.title }}</div>
+              <div class="text-xs text-wa-muted line-clamp-1">{{ p.summary or '' }}</div>
+            </div>
+            <span class="pill {% if p.status=='published' %}pill-ok{% elif p.status=='drafted' %}pill-warn{% else %}pill-off{% endif %}">{{ p.status }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <div class="text-sm text-wa-muted py-6 text-center">No drafts yet. Add a source and tap <em>Scrape now</em>.</div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}

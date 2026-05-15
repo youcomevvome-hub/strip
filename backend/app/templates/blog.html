@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Blog · Strip{% endblock %}
+{% block page_title %}Blog{% endblock %}
+
+{% block content %}
+  <div class="flex items-center justify-between mb-5">
+    <div>
+      <h2 class="text-xl font-semibold">Posts</h2>
+      <p class="text-sm text-wa-muted">View, like, share, or delete every post Strip has stripped.</p>
+    </div>
+    <a href="/ui/queue" class="btn btn-ghost">
+      <svg class="w-4 h-4"><use href="#i-queue"/></svg>Review queue
+    </a>
+  </div>
+
+  {% if posts %}
+    <div class="grid md:grid-cols-2 gap-4">
+      {% for p in posts %}
+      {% set ent = p.entities or {} %}
+      <article class="card overflow-hidden anim-fade">
+        <div class="p-4 border-b border-wa-border flex items-start gap-3">
+          <div class="w-9 h-9 rounded-full bg-wa-bubble flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-wa-dark"><use href="#{{ ent.kind|kind_icon }}"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <h3 class="font-semibold leading-tight truncate">{{ p.title }}</h3>
+            <div class="text-xs text-wa-muted mt-0.5">
+              {{ p.created_at.strftime('%b %d, %Y') if p.created_at else '' }}
+              · {{ p.status }}
+              {% if ent.kind and ent.kind != 'article' %} · {{ ent.kind|title }}{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="p-4 space-y-3">
+          <p class="text-sm text-wa-text/90">{{ p.summary }}</p>
+
+          {% if ent.highlights %}
+          <div class="flex flex-wrap gap-1.5">
+            {% for h in ent.highlights[:6] %}
+              <span class="text-[11px] bg-wa-bubble/60 text-wa-dark px-2 py-0.5 rounded-full">{{ h }}</span>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          {% if ent.universities %}
+          <div class="text-xs text-wa-muted">
+            <span class="font-medium text-wa-text">Universities:</span>
+            {{ ent.universities|join(", ") }}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="border-t border-wa-border bg-wa-bgpanel/40 px-3 py-2 flex items-center justify-between gap-1">
+          <div class="flex items-center gap-2 text-xs text-wa-muted">
+            <svg class="w-4 h-4"><use href="#i-eye"/></svg>{{ p.views or 0 }}
+            <svg class="w-4 h-4 ml-2"><use href="#i-heart"/></svg>{{ p.likes or 0 }}
+          </div>
+          <div class="flex items-center gap-1">
+            <a href="/p/{{ p.id }}" target="_blank" class="btn btn-ghost px-2 py-1 text-xs" title="View">
+              <svg class="w-4 h-4"><use href="#i-eye"/></svg>View
+            </a>
+            <form action="/ui/posts/{{ p.id }}/like" method="post">
+              <button class="btn btn-ghost px-2 py-1 text-xs" title="Like">
+                <svg class="w-4 h-4"><use href="#i-heart"/></svg>Like
+              </button>
+            </form>
+            <button type="button" onclick="openShare({{ p.id }}, {{ p.title|tojson }})"
+                    class="btn btn-ghost px-2 py-1 text-xs" title="Share">
+              <svg class="w-4 h-4"><use href="#i-share"/></svg>Share
+            </button>
+            <form action="/ui/posts/{{ p.id }}/delete" method="post"
+                  onsubmit="return confirm('Delete this post permanently?');">
+              <button class="btn btn-ghost px-2 py-1 text-xs text-red-600" title="Delete">
+                <svg class="w-4 h-4"><use href="#i-trash"/></svg>Delete
+              </button>
+            </form>
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card p-10 text-center text-wa-muted anim-fade">
+      <div class="w-14 h-14 rounded-full bg-wa-bubble mx-auto flex items-center justify-center mb-3">
+        <svg class="w-7 h-7 text-wa-dark"><use href="#i-book"/></svg>
+      </div>
+      <div class="font-medium text-wa-text">No posts yet</div>
+      <div class="text-sm">Add a source on <a class="text-wa-link hover:underline" href="/ui/sources">Sources</a> and scrape to populate the blog.</div>
+    </div>
+  {% endif %}
+{% endblock %}

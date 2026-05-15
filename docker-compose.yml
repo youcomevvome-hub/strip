@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    env_file: ./backend/.env
+    volumes:
+      - ./backend:/app
+      - strip-data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/strip.db
+      - OLLAMA_BASE_URL=http://ollama:11434
+
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000
+    depends_on: [backend]
+
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes:
+      - ollama-data:/root/.ollama
+
+volumes:
+  strip-data:
+  ollama-data:

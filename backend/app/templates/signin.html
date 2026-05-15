@@ -1,0 +1,78 @@
+{# Combined sign-in / first-run sign-up. First user is auto-provisioned on submit. #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in · Strip</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2300a884'%3E%3Cpath d='M12 2a10 10 0 1 0 5.3 18.4L22 22l-1.6-4.7A10 10 0 0 0 12 2z'/%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: "Segoe UI Historic","Segoe UI","Helvetica Neue",Helvetica,Arial,sans-serif; background:#d1d7db; }
+    .wa-band { background:#00a884; height:222px; }
+    .field { width:100%; padding:.7rem .9rem; border:1px solid #e9edef; border-radius:10px; background:#f7f8f9; }
+    .field:focus { outline:none; background:white; border-color:#00a884; box-shadow:0 0 0 3px rgba(0,168,132,.15); }
+    .btn-primary { background:#00a884; color:white; border-radius:24px; padding:.7rem 1.2rem; font-weight:500; transition: background .15s ease, transform .08s ease; }
+    .btn-primary:hover { background:#008069; }
+    .btn-primary:active { transform: scale(.97); }
+    @keyframes wa-pop { 0%{transform:scale(.96);opacity:0} 60%{transform:scale(1.02);opacity:1} 100%{transform:scale(1)} }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes wa-logo-spin {
+      0%   { transform: rotate(0deg)    scale(1); }
+      20%  { transform: rotate(180deg)  scale(1.1); }
+      40%  { transform: rotate(540deg)  scale(1); }
+      55%  { transform: rotate(540deg)  scale(1); }
+      70%  { transform: rotate(180deg)  scale(1.1); }
+      85%  { transform: rotate(-90deg)  scale(1); }
+      100% { transform: rotate(0deg)    scale(1); }
+    }
+    .pop { animation: wa-pop .35s ease both; }
+    .logo-spin { animation: wa-logo-spin 6s ease-in-out infinite; transform-origin: 50% 50%; }
+  </style>
+</head>
+<body>
+  <div class="wa-band fixed top-0 inset-x-0"></div>
+  <div class="relative min-h-screen flex flex-col items-center justify-center px-4 py-10">
+    <div class="flex items-center gap-3 text-white mb-6">
+      <svg class="w-7 h-7 logo-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg>
+      <div class="text-lg font-medium tracking-wide">STRIP</div>
+    </div>
+
+    <div class="pop w-full max-w-[440px] bg-white rounded-md shadow-lg p-8">
+      <h1 class="text-xl font-semibold mb-1">Sign in to Strip</h1>
+      <p class="text-sm text-[#54656f] mb-5">
+        You only need an account to publish to social networks. Browsing, scraping, and the RSS output all work without one.
+      </p>
+
+      {% if error %}
+        <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-4">{{ error }}</div>
+      {% endif %}
+
+      <form action="/ui/signin" method="post" class="space-y-3">
+        <input type="hidden" name="next" value="{{ next or '/ui/dashboard' }}">
+        <div>
+          <label class="text-xs text-[#54656f]">Email</label>
+          <input class="field" name="email" type="email" required autocomplete="email" autofocus placeholder="you@example.com">
+        </div>
+        <div>
+          <label class="text-xs text-[#54656f]">Password</label>
+          <input class="field" name="password" type="password" required autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button class="btn-primary w-full mt-1">Sign in</button>
+      </form>
+
+      <div class="mt-5 text-xs text-[#54656f] text-center">
+        First time? Your account is created automatically on first sign-in.
+      </div>
+
+      <div class="mt-5 text-center">
+        <a href="/ui/dashboard" class="text-sm text-[#027eb5] hover:underline">← Continue without signing in</a>
+      </div>
+    </div>
+
+    <div class="mt-6 text-[12px] text-[#54656f] text-center">
+      End-to-end signed sessions. Strip stores credentials locally on your machine.
+    </div>
+  </div>
+</body>
+</html>

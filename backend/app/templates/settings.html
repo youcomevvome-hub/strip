@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% set platform_meta = [
+  ('twitter','i-twitter','Twitter / X','TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET'),
+  ('linkedin','i-linkedin','LinkedIn','LINKEDIN_ACCESS_TOKEN, LINKEDIN_ACTOR_URN'),
+  ('facebook','i-facebook','Facebook Page','FACEBOOK_PAGE_ID, FACEBOOK_PAGE_TOKEN'),
+  ('instagram','i-instagram','Instagram','INSTAGRAM_USER_ID, INSTAGRAM_ACCESS_TOKEN'),
+  ('whatsapp','i-whatsapp','WhatsApp Cloud','WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_TO'),
+  ('reddit','i-reddit','Reddit','REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD, REDDIT_SUBREDDIT'),
+  ('telegram','i-telegram','Telegram','TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID'),
+  ('discord','i-discord','Discord','DISCORD_WEBHOOK_URL'),
+  ('mastodon','i-mastodon','Mastodon','MASTODON_BASE_URL, MASTODON_ACCESS_TOKEN'),
+  ('rss','i-rss','RSS feed','no credentials needed; publishes to /rss'),
+] %}
+
+{% block content %}
+  <div class="grid lg:grid-cols-2 gap-6 anim-stagger">
+
+    <div class="card p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-wa-green"><use href="#i-user"/></svg>
+        <div class="font-medium">Account</div>
+      </div>
+      {% if user %}
+        <div class="text-sm">Signed in as <span class="font-medium">{{ user.email }}</span>.</div>
+        <a href="/ui/logout" class="btn btn-ghost mt-3"><svg class="w-4 h-4"><use href="#i-logout"/></svg>Sign out</a>
+      {% else %}
+        <p class="text-sm text-wa-muted">You’re browsing as a guest. Sign in to publish to real social platforms (RSS works without an account).</p>
+        <a href="/ui/signin" class="btn btn-primary mt-3"><svg class="w-4 h-4"><use href="#i-user"/></svg>Sign in</a>
+      {% endif %}
+    </div>
+
+    <div class="card p-5">
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-wa-green"><use href="#i-link"/></svg>
+        <div class="font-medium">Machine API key</div>
+      </div>
+      <p class="text-sm text-wa-muted mb-3">Use this with the <code class="bg-wa-bgpanel px-1 rounded">X-API-Key</code> header to integrate Strip into your own app.</p>
+      <div class="font-mono text-sm bg-wa-bgpanel rounded-lg p-3 break-all">{{ api_key }}</div>
+      <p class="text-[11px] text-wa-muted mt-2">Configured in <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code>. Change <code>API_KEY=</code> and restart.</p>
+    </div>
+
+    <div class="card p-5 lg:col-span-2">
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-wa-green"><use href="#i-settings"/></svg>
+        <div class="font-medium">Social platforms</div>
+      </div>
+      <p class="text-sm text-wa-muted mb-4">
+        Configured platforms are listed below. To enable a paid platform, add its credentials to
+        <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code> and restart. RSS is always available.
+      </p>
+      <div class="grid sm:grid-cols-2 gap-3">
+        {% for key, icon, label, envs in platform_meta %}
+        {% set is_conf = configured.get(key) %}
+        <div class="border border-wa-border rounded-xl p-3 flex items-start gap-3 hover:bg-wa-bgpanel/40 transition-colors">
+          <div class="w-10 h-10 rounded-lg {% if is_conf %}bg-wa-bubble text-wa-dark{% else %}bg-wa-bgpanel text-wa-iconfill{% endif %} flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5"><use href="#{{ icon }}"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <div class="font-medium">{{ label }}</div>
+              {% if is_conf %}<span class="pill pill-ok">ready</span>{% else %}<span class="pill pill-off">not set</span>{% endif %}
+            </div>
+            <div class="text-[11px] text-wa-muted mt-1 break-all">{{ envs }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card p-5 lg:col-span-2">
+      <div class="flex items-center gap-2 mb-3">
+        <svg class="w-5 h-5 text-wa-green"><use href="#i-telegram"/></svg>
+        <div class="font-medium">Telegram bot</div>
+      </div>
+      <p class="text-sm text-wa-muted mb-3">
+        Set <code class="bg-wa-bgpanel px-1 rounded">TELEGRAM_BOT_TOKEN</code> and
+        <code class="bg-wa-bgpanel px-1 rounded">TELEGRAM_CHAT_IDS</code> (comma-separated chat / channel IDs)
+        in <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code>, then send a test message:
+      </p>
+      <div class="flex items-center gap-2 mb-3">
+        <form action="/ui/telegram/test" method="post">
+          <button class="btn btn-primary" {% if not configured.get('telegram') %}disabled{% endif %}>
+            <svg class="w-4 h-4"><use href="#i-send"/></svg>
+            Send test message
+          </button>
+        </form>
+        <div class="text-xs text-wa-muted">
+          Bot publishes published posts with title, key facts, image, and apply link.
+        </div>
+      </div>
+      {% if telegram_test %}
+        <div class="text-sm rounded-lg p-3 {% if telegram_test.ok %}bg-green-50 border border-green-200 text-green-800{% else %}bg-red-50 border border-red-200 text-red-700{% endif %}">
+          {% if telegram_test.ok %}Test message delivered.{% else %}Telegram test failed.{% endif %}
+          <ul class="mt-2 text-xs space-y-0.5">
+            {% for r in telegram_test.results or [] %}
+              <li>chat <code>{{ r.chat }}</code>: {{ r.status }} {{ r.body }}</li>
+            {% endfor %}
+            {% if telegram_test.error %}<li>{{ telegram_test.error }}</li>{% endif %}
+          </ul>
+        </div>
+      {% endif %}
+    </div>
+
+  </div>
+{% endblock %}

@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Sources{% endblock %}
+
+{% block header_actions %}
+  <form action="/ui/sources/scrape-all" method="post">
+    <button class="btn btn-primary"><svg class="w-4 h-4"><use href="#i-refresh"/></svg>Scrape all</button>
+  </form>
+{% endblock %}
+
+{% block content %}
+  <div class="card p-5 mb-6 anim-fade">
+    <div class="flex items-center gap-2 mb-1">
+      <svg class="w-5 h-5 text-wa-green"><use href="#i-spark"/></svg>
+      <div class="font-medium">Add a website</div>
+    </div>
+    <p class="text-sm text-wa-muted mb-4">Paste the URL. Add <em>keywords</em> to only keep articles whose title/content matches what you care about. Put several sites in the same <em>group</em> to strip them all with one click.</p>
+    <form action="/ui/sources/add" method="post" class="grid md:grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-wa-muted">Name</label>
+        <input class="field" name="name" required placeholder="Hacker News">
+      </div>
+      <div>
+        <label class="text-xs text-wa-muted">Website URL</label>
+        <input class="field" name="url" type="url" required placeholder="https://news.ycombinator.com">
+      </div>
+      <div class="md:col-span-2">
+        <label class="text-xs text-wa-muted">Search keywords (comma-separated, optional)</label>
+        <input class="field" name="keywords" placeholder="scholarship, fully funded, undergraduate, africa">
+      </div>
+      <div>
+        <label class="text-xs text-wa-muted">Group (optional)</label>
+        <input class="field" name="group_name" placeholder="scholarships-africa" list="group-list">
+      </div>
+      <div>
+        <label class="text-xs text-wa-muted">Tags (optional)</label>
+        <input class="field" name="tags" placeholder="tech, startups">
+      </div>
+      <div class="md:col-span-2 flex justify-end">
+        <button class="btn btn-primary"><svg class="w-4 h-4"><use href="#i-plus"/></svg>Add source</button>
+      </div>
+    </form>
+
+    <datalist id="group-list">
+      {% for g in groups.keys() %}<option value="{{ g }}">{% endfor %}
+    </datalist>
+  </div>
+
+  <div class="card p-5 mb-6 anim-fade">
+    <div class="flex items-center gap-2 mb-1">
+      <svg class="w-5 h-5 text-wa-green"><use href="#i-plus"/></svg>
+      <div class="font-medium">Bulk add: many sites at once</div>
+    </div>
+    <p class="text-sm text-wa-muted mb-3">Paste one URL per line, or <code class="bg-wa-bgpanel px-1 rounded">Name | https://...</code> per line. They will all share the same group + keyword filter, and you can scrape the whole group with one button.</p>
+    <form action="/ui/sources/bulk-add" method="post" class="space-y-3">
+      <textarea class="field font-mono text-xs" name="urls" rows="5" required
+        placeholder="Opportunity Desk | https://opportunitydesk.org&#10;After School Africa | https://afterschoolafrica.com&#10;https://www.scholars4dev.com"></textarea>
+      <div class="grid md:grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-wa-muted">Group name</label>
+          <input class="field" name="group_name" placeholder="scholarships-africa" list="group-list" required>
+        </div>
+        <div>
+          <label class="text-xs text-wa-muted">Shared keyword filter</label>
+          <input class="field" name="keywords" placeholder="scholarship, fully funded, masters">
+        </div>
+      </div>
+      <div class="flex justify-end">
+        <button class="btn btn-primary"><svg class="w-4 h-4"><use href="#i-plus"/></svg>Add group</button>
+      </div>
+    </form>
+  </div>
+
+  {% if groups %}
+  <div class="card p-4 mb-6 anim-fade">
+    <div class="text-xs uppercase tracking-wider text-wa-muted font-semibold mb-2">Scrape a group</div>
+    <div class="flex flex-wrap gap-2">
+      {% for g, items in groups.items() %}
+        <form action="/ui/sources/group/{{ g }}/scrape" method="post">
+          <button class="btn btn-ghost" title="Strip all {{ items|length }} sites in {{ g }}">
+            <svg class="w-4 h-4"><use href="#i-refresh"/></svg>
+            {{ g }} <span class="text-wa-muted ml-1">({{ items|length }})</span>
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if sources %}
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 anim-stagger">
+      {% for s in sources %}
+      <div class="card p-4 hover:shadow-walg transition-shadow">
+        <div class="flex items-start gap-3">
+          <div class="w-10 h-10 rounded-lg bg-wa-bubble text-wa-dark flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5"><use href="#i-globe"/></svg>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="font-medium truncate">{{ s.name }}</div>
+            <a href="{{ s.url }}" target="_blank" rel="noopener" class="text-xs text-wa-link hover:underline truncate block">{{ s.url|domain }}</a>
+            <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+              {% if s.enabled %}<span class="pill pill-ok">live</span>{% else %}<span class="pill pill-off">paused</span>{% endif %}
+              <span class="pill pill-off">{{ s.scrape_mode }}</span>
+              {% if s.group_name %}<span class="pill pill-off">▦ {{ s.group_name }}</span>{% endif %}
+              {% if s.keywords %}<span class="pill pill-off" title="{{ s.keywords }}">🔎 {{ (s.keywords.split(',')|length) }} kw</span>{% endif %}
+            </div>
+          </div>
+        </div>
+
+        <details class="mt-3">
+          <summary class="text-xs text-wa-link cursor-pointer hover:underline">Edit keywords / group</summary>
+          <form action="/ui/sources/{{ s.id }}/update" method="post" class="mt-2 space-y-2">
+            <input class="field text-xs" name="name" value="{{ s.name }}">
+            <input class="field text-xs" name="keywords" value="{{ s.keywords or '' }}" placeholder="comma-separated keywords">
+            <input class="field text-xs" name="group_name" value="{{ s.group_name or '' }}" placeholder="group name" list="group-list">
+            <div class="flex justify-end">
+              <button class="btn btn-ghost !py-1 !px-2 text-xs"><svg class="w-3 h-3"><use href="#i-check"/></svg>Save</button>
+            </div>
+          </form>
+        </details>
+
+        <div class="text-[11px] text-wa-muted mt-3">
+          {% if s.last_scraped_at %}Last scraped {{ s.last_scraped_at.strftime('%b %d, %H:%M') }} UTC{% else %}Never scraped{% endif %}
+        </div>
+        <div class="mt-3 flex items-center justify-between gap-2 pt-3 border-t border-wa-border">
+          <form action="/ui/sources/{{ s.id }}/toggle" method="post">
+            <label class="switch" title="Enable / pause">
+              <input type="checkbox" {% if s.enabled %}checked{% endif %} onclick="this.form.submit()">
+              <span class="knob"></span>
+            </label>
+          </form>
+          <div class="flex items-center gap-1">
+            <form action="/ui/sources/{{ s.id }}/scrape" method="post">
+              <button class="btn btn-ghost !py-1.5 !px-3 text-sm" title="Scrape now">
+                <svg class="w-4 h-4"><use href="#i-refresh"/></svg>Scrape
+              </button>
+            </form>
+            <form action="/ui/sources/{{ s.id }}/delete" method="post" onsubmit="return confirm('Delete this source and all its articles?')">
+              <button class="btn btn-danger !py-1.5 !px-3" title="Delete">
+                <svg class="w-4 h-4"><use href="#i-trash"/></svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="card p-10 text-center text-wa-muted anim-fade">
+      <div class="w-14 h-14 rounded-full bg-wa-bgpanel mx-auto flex items-center justify-center mb-3">
+        <svg class="w-7 h-7 text-wa-iconfill"><use href="#i-globe"/></svg>
+      </div>
+      <div class="font-medium text-wa-text">No sources yet</div>
+      <div class="text-sm">Add the first website above to start stripping.</div>
+    </div>
+  {% endif %}
+{% endblock %}
