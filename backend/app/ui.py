@@ -287,12 +287,72 @@ async def sources_update(sid: int, request: Request, db: Session = Depends(get_d
     return RedirectResponse("/ui/sources", status_code=303)
 
 
+# ---------------- scrape job tracking ----------------
+SCRAPE_JOB: dict = {"state": "idle", "started": None, "finished": None,
+                    "total": 0, "done": 0, "current": None, "results": []}
+_SCRAPE_LOCK = threading.Lock()
+
+
+def _scrape_worker(source_ids: list[int] | None) -> None:
+    """Background scrape worker. If source_ids is None, scrape all enabled."""
+    db = SessionLocal()
+    try:
+        if source_ids is None:
+            sources = db.query(Source).filter_by(enabled=True).all()
+        else:
+            sources = [s for s in (db.get(Source, sid) for sid in source_ids) if s is not None]
+        with _SCRAPE_LOCK:
+            SCRAPE_JOB.update(total=len(sources), done=0, results=[], state="running",
+                              started=time.time(), finished=None, current=None)
+        for s in sources:
+            with _SCRAPE_LOCK:
+                SCRAPE_JOB["current"] = s.name
+            try:
+                r = run_pipeline_for_source(db, s)
+            except Exception as e:
+                logger.exception("scrape failed for %s: %s", s.name, e)
+                r = {"source_id": s.id, "fetched": 0, "new": 0, "drafted": 0, "error": str(e)}
+            with _SCRAPE_LOCK:
+                SCRAPE_JOB["done"] += 1
+                SCRAPE_JOB["results"].append({"source": s.name, **r})
+        with _SCRAPE_LOCK:
+            SCRAPE_JOB["state"] = "done"
+            SCRAPE_JOB["finished"] = time.time()
+            SCRAPE_JOB["current"] = None
+    finally:
+        db.close()
+
+
+def _start_scrape(source_ids: list[int] | None) -> bool:
+    """Start a scrape job if none is currently running. Returns True if started."""
+    with _SCRAPE_LOCK:
+        if SCRAPE_JOB["state"] == "running":
+            return False
+        SCRAPE_JOB.update(state="starting", total=0, done=0, results=[],
+                          started=time.time(), finished=None, current=None)
+    threading.Thread(target=_scrape_worker, args=(source_ids,), daemon=True).start()
+    return True
+
+
+@ui_router.get("/ui/scrape/status")
+def scrape_status():
+    with _SCRAPE_LOCK:
+        return JSONResponse({
+            "state": SCRAPE_JOB["state"],
+            "started": SCRAPE_JOB["started"],
+            "finished": SCRAPE_JOB["finished"],
+            "total": SCRAPE_JOB["total"],
+            "done": SCRAPE_JOB["done"],
+            "current": SCRAPE_JOB["current"],
+            "results": list(SCRAPE_JOB["results"]),
+        })
+
+
 @ui_router.post("/ui/sources/group/{group}/scrape")
 def sources_group_scrape(group: str, db: Session = Depends(get_db)):
     sources = db.query(Source).filter_by(group_name=group, enabled=True).all()
-    for s in sources:
-        run_pipeline_for_source(db, s)
-    return RedirectResponse("/ui/queue", status_code=303)
+    _start_scrape([s.id for s in sources])
+    return RedirectResponse("/ui/queue?scraping=1", status_code=303)
 
 
 @ui_router.post("/ui/sources/{sid}/delete")
@@ -316,14 +376,14 @@ def sources_toggle(sid: int, db: Session = Depends(get_db)):
 def sources_scrape(sid: int, db: Session = Depends(get_db)):
     s = db.get(Source, sid)
     if s:
-        run_pipeline_for_source(db, s)
-    return RedirectResponse("/ui/queue", status_code=303)
+        _start_scrape([s.id])
+    return RedirectResponse("/ui/queue?scraping=1", status_code=303)
 
 
 @ui_router.post("/ui/sources/scrape-all")
 def sources_scrape_all():
-    run_pipeline_all()
-    return RedirectResponse("/ui/queue", status_code=303)
+    _start_scrape(None)
+    return RedirectResponse("/ui/queue?scraping=1", status_code=303)
 
 
 # ---------------- queue ----------------
@@ -537,6 +597,8 @@ def post_like(pid: int, request: Request, db: Session = Depends(get_db)):
     if p:
         p.likes = (p.likes or 0) + 1
         db.commit()
+    if _wants_json(request):
+        return JSONResponse({"ok": True, "likes": p.likes if p else 0})
     referer = request.headers.get("referer") or "/ui/blog"
     return RedirectResponse(referer, status_code=303)
 
@@ -818,3 +880,33 @@ def rss_feed(db: Session = Depends(get_db)):
             dt = dt.replace(tzinfo=timezone.utc)
         fe.pubDate(dt)
     return Response(content=fg.rss_str(pretty=True), media_type="application/rss+xml")
+
+
+# ---------------- SEO: sitemap + robots.txt ----------------
+@ui_router.get("/robots.txt")
+def robots_txt(request: Request):
+    base = str(request.base_url).rstrip("/")
+    body = f"User-agent: *\nAllow: /\nDisallow: /ui/\nDisallow: /api/\nSitemap: {base}/sitemap.xml\n"
+    return Response(body, media_type="text/plain")
+
+
+@ui_router.get("/sitemap.xml")
+def sitemap_xml(request: Request, db: Session = Depends(get_db)):
+    """XML sitemap of every published post for search engines."""
+    base = str(request.base_url).rstrip("/")
+    posts = (
+        db.query(Post).filter(Post.status.in_(["drafted", "published"]))
+        .order_by(Post.updated_at.desc()).limit(5000).all()
+    )
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>',
+             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    lines.append(f"<url><loc>{base}/ui/blog</loc><changefreq>daily</changefreq><priority>0.8</priority></url>")
+    for p in posts:
+        lastmod = (p.updated_at or p.created_at or datetime.utcnow()).strftime("%Y-%m-%d")
+        lines.append(
+            f"<url><loc>{base}/p/{p.id}</loc>"
+            f"<lastmod>{lastmod}</lastmod>"
+            f"<changefreq>weekly</changefreq><priority>0.7</priority></url>"
+        )
+    lines.append("</urlset>")
+    return Response("\n".join(lines), media_type="application/xml")

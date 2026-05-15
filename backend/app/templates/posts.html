@@ -36,7 +36,7 @@
                   <div class="text-xs text-wa-muted line-clamp-2">{{ p.summary or '' }}</div>
                   <div class="text-[11px] text-wa-muted mt-1">
                     <svg class="w-3 h-3 inline -mt-0.5"><use href="#i-eye"/></svg> {{ p.views or 0 }}
-                    · <svg class="w-3 h-3 inline -mt-0.5"><use href="#i-heart"/></svg> {{ p.likes or 0 }}
+                    · <svg class="w-3 h-3 inline -mt-0.5"><use href="#i-heart"/></svg> <span class="like-count">{{ p.likes or 0 }}</span>
                   </div>
                 </div>
               </div>
@@ -68,8 +68,8 @@
                   </button>
                 </form>
                 <button type="button"
-                        onclick="openShare({{ p.id }}, {{ p.title|tojson }})"
-                        class="btn btn-ghost px-2 py-1" title="Share">
+                        class="btn btn-ghost px-2 py-1 js-share" title="Share"
+                        data-post-id="{{ p.id }}" data-post-title="{{ p.title|e }}">
                   <svg class="w-4 h-4"><use href="#i-share"/></svg>
                 </button>
                 <form action="/ui/posts/{{ p.id }}/delete" method="post"

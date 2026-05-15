@@ -61,7 +61,7 @@
         <div class="border-t border-wa-border bg-wa-bgpanel/40 px-3 py-2 flex items-center justify-between gap-1">
           <div class="flex items-center gap-2 text-xs text-wa-muted">
             <svg class="w-4 h-4"><use href="#i-eye"/></svg>{{ p.views or 0 }}
-            <svg class="w-4 h-4 ml-2"><use href="#i-heart"/></svg>{{ p.likes or 0 }}
+            <svg class="w-4 h-4 ml-2"><use href="#i-heart"/></svg><span class="like-count">{{ p.likes or 0 }}</span>
           </div>
           <div class="flex items-center gap-1">
             <a href="/p/{{ p.id }}" target="_blank" class="btn btn-ghost px-2 py-1 text-xs" title="View">
@@ -72,8 +72,9 @@
                 <svg class="w-4 h-4"><use href="#i-heart"/></svg>Like
               </button>
             </form>
-            <button type="button" onclick="openShare({{ p.id }}, {{ p.title|tojson }})"
-                    class="btn btn-ghost px-2 py-1 text-xs" title="Share">
+            <button type="button"
+                    class="btn btn-ghost px-2 py-1 text-xs js-share" title="Share"
+                    data-post-id="{{ p.id }}" data-post-title="{{ p.title|e }}">
               <svg class="w-4 h-4"><use href="#i-share"/></svg>Share
             </button>
             <form action="/ui/posts/{{ p.id }}/delete" method="post"
