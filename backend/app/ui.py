@@ -452,6 +452,81 @@ def post_reject(pid: int, db: Session = Depends(get_db)):
     return RedirectResponse("/ui/queue", status_code=303)
 
 
+@ui_router.post("/ui/posts/bulk/reject")
+async def posts_bulk_reject(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    ids = _parse_ids(form.getlist("ids") or form.getlist("post_ids"))
+    rejected = 0
+    for pid in ids:
+        p = db.get(Post, pid)
+        if p and p.status != "rejected":
+            p.status = "rejected"
+            if p.article:
+                p.article.status = "rejected"
+            rejected += 1
+    db.commit()
+    if _wants_json(request):
+        return JSONResponse({"rejected": rejected, "ids": ids})
+    return RedirectResponse("/ui/queue", status_code=303)
+
+
+@ui_router.post("/ui/posts/bulk/publish")
+async def posts_bulk_publish(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    ids = _parse_ids(form.getlist("ids") or form.getlist("post_ids"))
+    platforms = form.getlist("platforms") or ["rss"]
+    platforms = [pl for pl in platforms if pl in social.PUBLISHERS] or ["rss"]
+    needs_auth = any(plat != "rss" for plat in platforms)
+    if needs_auth and _current_user(request, db) is None:
+        if _wants_json(request):
+            return JSONResponse({"error": "auth_required", "next": "/ui/signin?next=/ui/queue"}, status_code=401)
+        return RedirectResponse("/ui/signin?next=/ui/queue", status_code=303)
+
+    started: list[int] = []
+    skipped: list[int] = []
+    for pid in ids:
+        p = db.get(Post, pid)
+        if not p:
+            skipped.append(pid)
+            continue
+        with _JOB_LOCK:
+            existing = PUBLISH_JOBS.get(pid)
+            if existing and existing.get("state") == "running":
+                skipped.append(pid)
+                continue
+            PUBLISH_JOBS[pid] = {
+                "post_id": pid,
+                "state": "running",
+                "started": time.time(),
+                "finished": None,
+                "platforms": {plat: {"status": "pending", "error": None, "url": None} for plat in platforms},
+            }
+        threading.Thread(target=_publish_worker, args=(pid, list(platforms)), daemon=True).start()
+        started.append(pid)
+
+    if _wants_json(request):
+        return JSONResponse({"started": started, "skipped": skipped, "platforms": platforms})
+    return RedirectResponse("/ui/queue", status_code=303)
+
+
+def _parse_ids(raw: list[str]) -> list[int]:
+    out: list[int] = []
+    for s in raw:
+        for tok in str(s).replace(",", " ").split():
+            try:
+                out.append(int(tok))
+            except ValueError:
+                continue
+    # dedupe preserving order
+    seen: set[int] = set()
+    uniq: list[int] = []
+    for v in out:
+        if v not in seen:
+            seen.add(v)
+            uniq.append(v)
+    return uniq
+
+
 @ui_router.post("/ui/posts/{pid}/publish")
 async def post_publish(pid: int, request: Request, db: Session = Depends(get_db)):
     p = db.get(Post, pid)

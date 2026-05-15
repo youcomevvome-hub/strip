@@ -74,10 +74,46 @@
   {% endif %}
 
   {% if posts %}
+    <!-- Bulk action bar -->
+    <div id="bulk-bar" class="sticky top-2 z-30 mb-3 hidden">
+      <div class="card px-3 py-2 flex flex-wrap items-center gap-2 border border-wa-green/40 shadow-sm">
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input type="checkbox" id="bulk-select-all" class="accent-wa-green">
+          <span class="font-medium">Select all on page</span>
+        </label>
+        <span class="text-xs text-wa-muted" id="bulk-count">0 selected</span>
+        <div class="flex-1"></div>
+        <details class="relative">
+          <summary class="btn btn-ghost cursor-pointer list-none">
+            <svg class="w-4 h-4"><use href="#i-send"/></svg>Platforms
+          </summary>
+          <div class="absolute right-0 mt-1 bg-white border border-wa-border rounded-lg shadow-lg p-2 min-w-[220px] z-40">
+            {% for plat in platforms %}
+              {% set icon, label = platform_meta.get(plat, ('i-link', plat)) %}
+              <label class="flex items-center gap-2 px-2 py-1 hover:bg-wa-bgpanel rounded">
+                <input type="checkbox" class="accent-wa-green bulk-platform" value="{{ plat }}"
+                       {% if plat == 'rss' %}checked{% endif %}>
+                <svg class="w-4 h-4 text-wa-iconfill"><use href="#{{ icon }}"/></svg>
+                <span class="text-sm">{{ label }}</span>
+              </label>
+            {% endfor %}
+          </div>
+        </details>
+        <button id="bulk-reject" class="btn btn-danger" disabled>
+          <svg class="w-4 h-4"><use href="#i-x"/></svg>Reject selected
+        </button>
+        <button id="bulk-publish" class="btn btn-primary" disabled>
+          <svg class="w-4 h-4"><use href="#i-send"/></svg>Publish selected
+        </button>
+      </div>
+    </div>
+
     <div class="space-y-4 anim-stagger">
       {% for p in posts %}
-      <article class="card overflow-hidden">
+      <article class="card overflow-hidden" data-post-id="{{ p.id }}">
         <div class="flex items-start gap-3 p-4 border-b border-wa-border bg-wa-bgpanel/60">
+          <input type="checkbox" class="row-select mt-1 accent-wa-green" value="{{ p.id }}"
+                 aria-label="Select post {{ p.id }}">
           <div class="w-10 h-10 rounded-lg bg-wa-bubble text-wa-dark flex items-center justify-center shrink-0">
             <svg class="w-5 h-5"><use href="#{{ (p.entities.kind if p.entities else 'article')|kind_icon }}"/></svg>
           </div>
@@ -372,6 +408,7 @@
         const selected = fd.getAll('platforms');
         const platsInit = {};
         (selected.length ? selected : ['rss']).forEach(p => platsInit[p] = {status: 'pending'});
+        if (window.toast) toast('Publishing “' + (title || 'post') + '”…');
         openPublishModal(postId, title, platsInit);
         fetch(form.action, {
           method: 'POST',
@@ -381,9 +418,106 @@
           if (r.status === 401) {
             r.json().then(j => { location.href = j.next || '/ui/signin'; });
           }
-        }).catch(() => {});
+        }).catch(() => { if (window.toast) toast('Publish request failed', 'err'); });
       });
     });
+
+    // ---------------- Bulk select + bulk publish/reject ----------------
+    (function() {
+      const bar = document.getElementById('bulk-bar');
+      if (!bar) return;
+      const rows = () => Array.from(document.querySelectorAll('.row-select'));
+      const selected = () => rows().filter(c => c.checked).map(c => parseInt(c.value, 10));
+      const countEl = document.getElementById('bulk-count');
+      const btnPub = document.getElementById('bulk-publish');
+      const btnRej = document.getElementById('bulk-reject');
+      const selectAll = document.getElementById('bulk-select-all');
+
+      function refresh() {
+        const ids = selected();
+        const n = ids.length;
+        bar.classList.toggle('hidden', false);
+        countEl.textContent = n + ' selected';
+        btnPub.disabled = n === 0;
+        btnRej.disabled = n === 0;
+        selectAll.checked = n > 0 && n === rows().length;
+        selectAll.indeterminate = n > 0 && n < rows().length;
+      }
+      document.addEventListener('change', function(ev) {
+        if (ev.target.classList && ev.target.classList.contains('row-select')) refresh();
+      });
+      selectAll.addEventListener('change', function() {
+        rows().forEach(c => { c.checked = selectAll.checked; });
+        refresh();
+      });
+
+      function bulkPlatforms() {
+        return Array.from(document.querySelectorAll('.bulk-platform'))
+                    .filter(c => c.checked).map(c => c.value);
+      }
+
+      btnRej.addEventListener('click', async function() {
+        const ids = selected();
+        if (!ids.length) return;
+        if (!confirm('Reject ' + ids.length + ' post(s)?')) return;
+        const fd = new FormData();
+        ids.forEach(i => fd.append('ids', String(i)));
+        btnRej.disabled = true;
+        try {
+          const r = await fetch('/ui/posts/bulk/reject', {
+            method: 'POST', body: fd,
+            headers: {'X-Requested-With': 'fetch', 'Accept': 'application/json'},
+          });
+          const j = await r.json().catch(() => ({}));
+          if (window.toast) toast('Rejected ' + (j.rejected || ids.length) + ' post(s)');
+          // Remove rejected cards from view
+          ids.forEach(i => {
+            const card = document.querySelector('article.card[data-post-id="' + i + '"]');
+            if (card) card.remove();
+          });
+          refresh();
+        } catch (e) {
+          if (window.toast) toast('Bulk reject failed', 'err');
+        } finally {
+          btnRej.disabled = false;
+        }
+      });
+
+      btnPub.addEventListener('click', async function() {
+        const ids = selected();
+        if (!ids.length) return;
+        const plats = bulkPlatforms();
+        if (!plats.length) {
+          if (window.toast) toast('Pick at least one platform', 'err');
+          return;
+        }
+        const fd = new FormData();
+        ids.forEach(i => fd.append('ids', String(i)));
+        plats.forEach(p => fd.append('platforms', p));
+        btnPub.disabled = true;
+        if (window.toast) toast('Publishing ' + ids.length + ' post(s) to ' + plats.join(', ') + '…');
+        try {
+          const r = await fetch('/ui/posts/bulk/publish', {
+            method: 'POST', body: fd,
+            headers: {'X-Requested-With': 'fetch', 'Accept': 'application/json'},
+          });
+          if (r.status === 401) {
+            const j = await r.json();
+            location.href = j.next || '/ui/signin';
+            return;
+          }
+          const j = await r.json().catch(() => ({}));
+          const n = (j.started || []).length;
+          if (window.toast) toast('Started ' + n + ' publish job(s)');
+        } catch (e) {
+          if (window.toast) toast('Bulk publish failed', 'err');
+        } finally {
+          btnPub.disabled = false;
+        }
+      });
+
+      refresh();
+    })();
 
     // Resume any active jobs on page load.
     const ACTIVE_JOBS = {{ (active_jobs or {})|tojson }};
