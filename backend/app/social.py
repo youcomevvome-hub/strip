@@ -231,8 +231,21 @@ def post_telegram(post: Post, content: str) -> dict:
     if not settings.TELEGRAM_BOT_TOKEN:
         return _skip()
     chats = [c.strip() for c in settings.TELEGRAM_CHAT_IDS.split(",") if c.strip()]
+    # Also forward to every enabled in-bot subscriber.
+    try:
+        from .db import SessionLocal
+        from .models import TelegramSubscriber
+        db = SessionLocal()
+        try:
+            for sub in db.query(TelegramSubscriber).filter_by(enabled=True).all():
+                if sub.chat_id and sub.chat_id not in chats:
+                    chats.append(sub.chat_id)
+        finally:
+            db.close()
+    except Exception:
+        pass
     if not chats:
-        return _skip("no TELEGRAM_CHAT_IDS")
+        return _skip("no TELEGRAM_CHAT_IDS and no subscribers")
 
     # Build a clean rich message: title (bold) + summary + key facts + apply CTA.
     ent = post.entities or {}

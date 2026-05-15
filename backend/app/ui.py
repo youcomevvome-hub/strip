@@ -507,12 +507,146 @@ async def upload_image(file: UploadFile = File(...)):
 
 
 # ---------------- settings ----------------
+# Groups of credential fields per platform — driven by the same env var names that
+# config.Settings exposes so apply_db_overrides() can pick them up.
+PLATFORM_CRED_FIELDS = {
+    "twitter":   ["TWITTER_API_KEY", "TWITTER_API_SECRET", "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_SECRET"],
+    "linkedin":  ["LINKEDIN_ACCESS_TOKEN", "LINKEDIN_AUTHOR_URN"],
+    "facebook":  ["FACEBOOK_PAGE_ID", "FACEBOOK_PAGE_TOKEN"],
+    "instagram": ["INSTAGRAM_USER_ID", "INSTAGRAM_ACCESS_TOKEN"],
+    "whatsapp":  ["WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_RECIPIENTS"],
+    "reddit":    ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USERNAME", "REDDIT_PASSWORD", "REDDIT_DEFAULT_SUBREDDIT"],
+    "telegram":  ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_IDS"],
+    "discord":   ["DISCORD_WEBHOOK_URL"],
+    "mastodon":  ["MASTODON_BASE_URL", "MASTODON_ACCESS_TOKEN"],
+    "ai":        ["OLLAMA_BASE_URL", "OLLAMA_MODEL"],
+}
+_SECRET_KEYS = {
+    "TWITTER_API_SECRET", "TWITTER_ACCESS_SECRET", "LINKEDIN_ACCESS_TOKEN",
+    "FACEBOOK_PAGE_TOKEN", "INSTAGRAM_ACCESS_TOKEN", "WHATSAPP_ACCESS_TOKEN",
+    "REDDIT_CLIENT_SECRET", "REDDIT_PASSWORD", "TELEGRAM_BOT_TOKEN",
+    "DISCORD_WEBHOOK_URL", "MASTODON_ACCESS_TOKEN",
+}
+
+
+def _settings_ctx(request: Request, db: Session, **extra) -> dict:
+    """Build the rich Settings template context."""
+    from . import tg_bot
+    from .models import Setting, TelegramSubscriber
+    s = settings  # already overlaid with DB values on startup / after save
+
+    def field(key: str) -> dict:
+        val = getattr(s, key, "") or ""
+        is_secret = key in _SECRET_KEYS
+        return {
+            "name": key,
+            "value": val if not is_secret else ("•" * 8 if val else ""),
+            "is_secret": is_secret,
+            "has_value": bool(val),
+        }
+
+    platform_cards = []
+    for plat, keys in PLATFORM_CRED_FIELDS.items():
+        platform_cards.append({
+            "key": plat,
+            "fields": [field(k) for k in keys],
+            "configured": _configured_platforms().get(plat, False) if plat in _configured_platforms() else any(getattr(s, k, "") for k in keys),
+        })
+
+    subscribers = db.query(TelegramSubscriber).order_by(TelegramSubscriber.created_at.desc()).all()
+    bot_username = tg_bot.get_bot_username() if s.TELEGRAM_BOT_TOKEN else None
+
+    return _ctx(
+        request, db,
+        api_key=settings.API_KEY,
+        platform_cards=platform_cards,
+        subscribers=subscribers,
+        bot_username=bot_username,
+        **extra,
+    )
+
+
 @ui_router.get("/ui/settings", response_class=HTMLResponse)
 def settings_page(request: Request, db: Session = Depends(get_db)):
-    return templates.TemplateResponse(
-        "settings.html",
-        _ctx(request, db, api_key=settings.API_KEY),
-    )
+    return templates.TemplateResponse("settings.html", _settings_ctx(request, db))
+
+
+@ui_router.post("/ui/settings/save/{platform}")
+async def settings_save(
+    platform: str, request: Request, db: Session = Depends(get_db),
+):
+    from .config import apply_db_overrides
+    from .models import Setting
+    if platform not in PLATFORM_CRED_FIELDS:
+        raise HTTPException(404)
+    if _current_user(request, db) is None:
+        return RedirectResponse("/ui/signin?next=/ui/settings", status_code=303)
+    form = await request.form()
+    for key in PLATFORM_CRED_FIELDS[platform]:
+        val = (form.get(key) or "").strip()
+        # Empty submission on a secret field means "keep existing".
+        if not val and key in _SECRET_KEYS and getattr(settings, key, ""):
+            continue
+        row = db.get(Setting, key)
+        if row is None:
+            row = Setting(key=key, value=val)
+            db.add(row)
+        else:
+            row.value = val
+    db.commit()
+    apply_db_overrides()
+    return RedirectResponse("/ui/settings", status_code=303)
+
+
+@ui_router.post("/ui/account/profile")
+async def account_update_profile(request: Request, db: Session = Depends(get_db)):
+    """Change display name and / or email."""
+    user = _current_user(request, db)
+    if user is None:
+        return RedirectResponse("/ui/signin?next=/ui/settings", status_code=303)
+    form = await request.form()
+    new_email = (form.get("email") or "").strip().lower()
+    new_name = (form.get("name") or "").strip()[:120]
+    error = None
+    if new_email and new_email != user.email:
+        if db.query(User).filter_by(email=new_email).first():
+            error = "That email is already in use."
+        else:
+            user.email = new_email
+    user.name = new_name
+    db.commit()
+    # Refresh session cookie since email may have changed.
+    token = signer.dumps(user.email)
+    resp = RedirectResponse("/ui/settings", status_code=303)
+    resp.set_cookie(SESSION_COOKIE, token, max_age=SESSION_MAX_AGE,
+                    httponly=True, samesite="lax")
+    if error:
+        # Stash in querystring (lightweight, no flash framework).
+        resp = RedirectResponse(f"/ui/settings?err={quote_plus(error)}", status_code=303)
+    return resp
+
+
+@ui_router.post("/ui/account/password")
+async def account_change_password(request: Request, db: Session = Depends(get_db)):
+    user = _current_user(request, db)
+    if user is None:
+        return RedirectResponse("/ui/signin?next=/ui/settings", status_code=303)
+    form = await request.form()
+    current = form.get("current") or ""
+    new = form.get("new") or ""
+    confirm = form.get("confirm") or ""
+    if not verify_password(current, user.password_hash):
+        return RedirectResponse(f"/ui/settings?err={quote_plus('Current password incorrect.')}",
+                                status_code=303)
+    if len(new) < 6:
+        return RedirectResponse(f"/ui/settings?err={quote_plus('New password must be at least 6 characters.')}",
+                                status_code=303)
+    if new != confirm:
+        return RedirectResponse(f"/ui/settings?err={quote_plus('Passwords do not match.')}",
+                                status_code=303)
+    user.password_hash = hash_password(new)
+    db.commit()
+    return RedirectResponse(f"/ui/settings?ok={quote_plus('Password updated.')}", status_code=303)
 
 
 @ui_router.post("/ui/telegram/test")
@@ -521,8 +655,28 @@ def telegram_test(request: Request, db: Session = Depends(get_db)):
     result = social.telegram_send_test("Strip is connected. You will receive published posts here.")
     return templates.TemplateResponse(
         "settings.html",
-        _ctx(request, db, api_key=settings.API_KEY, telegram_test=result),
+        _settings_ctx(request, db, telegram_test=result),
     )
+
+
+@ui_router.post("/ui/telegram/subscriber/{sid}/toggle")
+def telegram_sub_toggle(sid: int, db: Session = Depends(get_db)):
+    from .models import TelegramSubscriber
+    sub = db.get(TelegramSubscriber, sid)
+    if sub:
+        sub.enabled = not sub.enabled
+        db.commit()
+    return RedirectResponse("/ui/settings", status_code=303)
+
+
+@ui_router.post("/ui/telegram/subscriber/{sid}/delete")
+def telegram_sub_delete(sid: int, db: Session = Depends(get_db)):
+    from .models import TelegramSubscriber
+    sub = db.get(TelegramSubscriber, sid)
+    if sub:
+        db.delete(sub)
+        db.commit()
+    return RedirectResponse("/ui/settings", status_code=303)
 
 
 # ---------------- RSS feed ----------------

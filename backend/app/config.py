@@ -67,3 +67,24 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def apply_db_overrides() -> None:
+    """Read Setting rows from the database and overlay them onto the in-memory
+    Settings instance. This lets the UI persist credentials at runtime without
+    editing .env files. Called on startup and after each /ui/settings/* save."""
+    try:
+        from .db import SessionLocal
+        from .models import Setting
+    except Exception:
+        return
+    s = get_settings()
+    db = SessionLocal()
+    try:
+        for row in db.query(Setting).all():
+            if hasattr(s, row.key) and row.value is not None:
+                setattr(s, row.key, row.value)
+    except Exception:
+        pass
+    finally:
+        db.close()

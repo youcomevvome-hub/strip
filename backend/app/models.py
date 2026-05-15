@@ -10,6 +10,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    name: Mapped[str] = mapped_column(String(120), default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -91,3 +92,27 @@ class Delivery(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     post: Mapped[Post] = relationship(back_populates="deliveries")
+
+
+class Setting(Base):
+    """Generic key/value store for runtime-editable configuration overrides.
+    Values stored here win over identically-named settings in .env.
+    Keys mirror the env-var names (e.g. TELEGRAM_BOT_TOKEN)."""
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(120), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TelegramSubscriber(Base):
+    """Telegram users who linked their account via the /start <token> deeplink.
+    New published posts are also forwarded to each subscriber's chat."""
+    __tablename__ = "telegram_subscribers"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    username: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    link_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

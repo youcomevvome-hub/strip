@@ -7,10 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import api as api_module
-from .config import get_settings
+from .config import get_settings, apply_db_overrides
 from .db import Base, engine
 from .scheduler import start_scheduler, stop_scheduler
 from .ui import ui_router
+from . import tg_bot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 settings = get_settings()
@@ -20,8 +21,11 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _auto_migrate()
+    apply_db_overrides()
     start_scheduler()
+    tg_bot.start()
     yield
+    tg_bot.stop()
     stop_scheduler()
 
 
@@ -37,6 +41,7 @@ def _auto_migrate():
         ("posts",    "cover_image_url", "ALTER TABLE posts ADD COLUMN cover_image_url TEXT"),
         ("sources",  "keywords",        "ALTER TABLE sources ADD COLUMN keywords VARCHAR(1024) DEFAULT ''"),
         ("sources",  "group_name",      "ALTER TABLE sources ADD COLUMN group_name VARCHAR(120) DEFAULT ''"),
+        ("users",    "name",            "ALTER TABLE users ADD COLUMN name VARCHAR(120) DEFAULT ''"),
     ]:
         if not insp.has_table(table):
             continue

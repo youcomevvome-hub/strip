@@ -1,97 +1,130 @@
 {% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 
-{% set platform_meta = [
-  ('twitter','i-twitter','Twitter / X','TWITTER_API_KEY, TWITTER_API_SECRET, TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_SECRET'),
-  ('linkedin','i-linkedin','LinkedIn','LINKEDIN_ACCESS_TOKEN, LINKEDIN_ACTOR_URN'),
-  ('facebook','i-facebook','Facebook Page','FACEBOOK_PAGE_ID, FACEBOOK_PAGE_TOKEN'),
-  ('instagram','i-instagram','Instagram','INSTAGRAM_USER_ID, INSTAGRAM_ACCESS_TOKEN'),
-  ('whatsapp','i-whatsapp','WhatsApp Cloud','WHATSAPP_PHONE_ID, WHATSAPP_ACCESS_TOKEN, WHATSAPP_TO'),
-  ('reddit','i-reddit','Reddit','REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD, REDDIT_SUBREDDIT'),
-  ('telegram','i-telegram','Telegram','TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID'),
-  ('discord','i-discord','Discord','DISCORD_WEBHOOK_URL'),
-  ('mastodon','i-mastodon','Mastodon','MASTODON_BASE_URL, MASTODON_ACCESS_TOKEN'),
-  ('rss','i-rss','RSS feed','no credentials needed; publishes to /rss'),
-] %}
+{% set platform_meta = {
+  'twitter':   ('i-twitter','Twitter / X'),
+  'linkedin':  ('i-linkedin','LinkedIn'),
+  'facebook':  ('i-facebook','Facebook Page'),
+  'instagram': ('i-instagram','Instagram'),
+  'whatsapp':  ('i-whatsapp','WhatsApp Cloud'),
+  'reddit':    ('i-reddit','Reddit'),
+  'telegram':  ('i-telegram','Telegram'),
+  'discord':   ('i-discord','Discord'),
+  'mastodon':  ('i-mastodon','Mastodon'),
+  'ai':        ('i-cpu','AI (Ollama)'),
+} %}
 
 {% block content %}
+  {% if request.query_params.get('ok') %}
+    <div class="card p-3 mb-4 bg-green-50 border-green-200 text-green-800 text-sm anim-fade">
+      {{ request.query_params.get('ok') }}
+    </div>
+  {% endif %}
+  {% if request.query_params.get('err') %}
+    <div class="card p-3 mb-4 bg-red-50 border-red-200 text-red-700 text-sm anim-fade">
+      {{ request.query_params.get('err') }}
+    </div>
+  {% endif %}
+
   <div class="grid lg:grid-cols-2 gap-6 anim-stagger">
 
+    {# ===================== Account ===================== #}
     <div class="card p-5">
       <div class="flex items-center gap-2 mb-3">
         <svg class="w-5 h-5 text-wa-green"><use href="#i-user"/></svg>
         <div class="font-medium">Account</div>
       </div>
       {% if user %}
-        <div class="text-sm">Signed in as <span class="font-medium">{{ user.email }}</span>.</div>
-        <a href="/ui/logout" class="btn btn-ghost mt-3"><svg class="w-4 h-4"><use href="#i-logout"/></svg>Sign out</a>
+        <form action="/ui/account/profile" method="post" class="space-y-3">
+          <div>
+            <label class="text-xs text-wa-muted">Display name</label>
+            <input class="field" name="name" value="{{ user.name or '' }}" placeholder="Your name">
+          </div>
+          <div>
+            <label class="text-xs text-wa-muted">Email</label>
+            <input class="field" name="email" type="email" value="{{ user.email }}" required>
+          </div>
+          <button class="btn btn-primary">
+            <svg class="w-4 h-4"><use href="#i-check"/></svg>Save profile
+          </button>
+        </form>
+
+        <div class="my-4 border-t border-wa-border"></div>
+
+        <form action="/ui/account/password" method="post" class="space-y-3">
+          <div class="text-xs font-semibold text-wa-muted tracking-wider uppercase">Change password</div>
+          <input class="field" name="current" type="password" placeholder="Current password" required>
+          <input class="field" name="new" type="password" placeholder="New password (min 6 chars)" required>
+          <input class="field" name="confirm" type="password" placeholder="Confirm new password" required>
+          <button class="btn btn-ghost">
+            <svg class="w-4 h-4"><use href="#i-key"/></svg>Update password
+          </button>
+        </form>
+
+        <div class="mt-4 pt-4 border-t border-wa-border">
+          <a href="/ui/logout" class="text-sm text-wa-link hover:underline">Sign out</a>
+        </div>
       {% else %}
-        <p class="text-sm text-wa-muted">You’re browsing as a guest. Sign in to publish to real social platforms (RSS works without an account).</p>
-        <a href="/ui/signin" class="btn btn-primary mt-3"><svg class="w-4 h-4"><use href="#i-user"/></svg>Sign in</a>
+        <p class="text-sm text-wa-muted mb-3">You're browsing as a guest. Sign in to manage credentials and your account.</p>
+        <a href="/ui/signin?next=/ui/settings" class="btn btn-primary">
+          <svg class="w-4 h-4"><use href="#i-user"/></svg>Sign in
+        </a>
       {% endif %}
     </div>
 
+    {# ===================== API key ===================== #}
     <div class="card p-5">
       <div class="flex items-center gap-2 mb-3">
         <svg class="w-5 h-5 text-wa-green"><use href="#i-link"/></svg>
         <div class="font-medium">Machine API key</div>
       </div>
-      <p class="text-sm text-wa-muted mb-3">Use this with the <code class="bg-wa-bgpanel px-1 rounded">X-API-Key</code> header to integrate Strip into your own app.</p>
+      <p class="text-sm text-wa-muted mb-3">Send this in the <code class="bg-wa-bgpanel px-1 rounded">X-API-Key</code> header to integrate Strip programmatically.</p>
       <div class="font-mono text-sm bg-wa-bgpanel rounded-lg p-3 break-all">{{ api_key }}</div>
-      <p class="text-[11px] text-wa-muted mt-2">Configured in <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code>. Change <code>API_KEY=</code> and restart.</p>
+      <p class="text-[11px] text-wa-muted mt-2">Set <code>API_KEY=</code> in <code>backend/.env</code> and restart to rotate.</p>
     </div>
 
+    {# ===================== Telegram bot ===================== #}
     <div class="card p-5 lg:col-span-2">
       <div class="flex items-center gap-2 mb-3">
-        <svg class="w-5 h-5 text-wa-green"><use href="#i-settings"/></svg>
-        <div class="font-medium">Social platforms</div>
-      </div>
-      <p class="text-sm text-wa-muted mb-4">
-        Configured platforms are listed below. To enable a paid platform, add its credentials to
-        <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code> and restart. RSS is always available.
-      </p>
-      <div class="grid sm:grid-cols-2 gap-3">
-        {% for key, icon, label, envs in platform_meta %}
-        {% set is_conf = configured.get(key) %}
-        <div class="border border-wa-border rounded-xl p-3 flex items-start gap-3 hover:bg-wa-bgpanel/40 transition-colors">
-          <div class="w-10 h-10 rounded-lg {% if is_conf %}bg-wa-bubble text-wa-dark{% else %}bg-wa-bgpanel text-wa-iconfill{% endif %} flex items-center justify-center shrink-0">
-            <svg class="w-5 h-5"><use href="#{{ icon }}"/></svg>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <div class="font-medium">{{ label }}</div>
-              {% if is_conf %}<span class="pill pill-ok">ready</span>{% else %}<span class="pill pill-off">not set</span>{% endif %}
-            </div>
-            <div class="text-[11px] text-wa-muted mt-1 break-all">{{ envs }}</div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="card p-5 lg:col-span-2">
-      <div class="flex items-center gap-2 mb-3">
-        <svg class="w-5 h-5 text-wa-green"><use href="#i-telegram"/></svg>
+        <svg class="w-5 h-5 text-[#0088cc]" viewBox="0 0 24 24" fill="currentColor"><path d="M9.04 15.32l-.36 5.05c.52 0 .75-.22 1.02-.49l2.45-2.34 5.08 3.72c.93.51 1.6.24 1.85-.86l3.36-15.74h.01c.29-1.37-.5-1.9-1.4-1.57L1.46 9.95c-1.34.52-1.32 1.27-.23 1.61l4.93 1.54L17.69 6.6c.54-.36 1.03-.16.62.2L9.04 15.32z"/></svg>
         <div class="font-medium">Telegram bot</div>
+        {% if bot_username %}
+          <span class="pill pill-ok ml-2">@{{ bot_username }}</span>
+        {% endif %}
       </div>
-      <p class="text-sm text-wa-muted mb-3">
-        Set <code class="bg-wa-bgpanel px-1 rounded">TELEGRAM_BOT_TOKEN</code> and
-        <code class="bg-wa-bgpanel px-1 rounded">TELEGRAM_CHAT_IDS</code> (comma-separated chat / channel IDs)
-        in <code class="bg-wa-bgpanel px-1 rounded">backend/.env</code>, then send a test message:
-      </p>
-      <div class="flex items-center gap-2 mb-3">
-        <form action="/ui/telegram/test" method="post">
-          <button class="btn btn-primary" {% if not configured.get('telegram') %}disabled{% endif %}>
-            <svg class="w-4 h-4"><use href="#i-send"/></svg>
-            Send test message
-          </button>
-        </form>
-        <div class="text-xs text-wa-muted">
-          Bot publishes published posts with title, key facts, image, and apply link.
+
+      {% if bot_username %}
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <div class="border border-wa-border rounded-xl p-4 bg-wa-bgpanel/40">
+            <div class="text-sm font-medium mb-2">Connect your Telegram</div>
+            <p class="text-xs text-wa-muted mb-3">
+              Open the bot and tap Start. You'll receive every new published post
+              automatically, plus you can use <code>/latest</code> and <code>/search</code> in chat.
+            </p>
+            {% set deep = 'https://t.me/' ~ bot_username ~ '?start=u' ~ (user.id if user else '0') ~ '-' ~ api_key[:8] %}
+            <a href="{{ deep }}" target="_blank" rel="noopener" class="btn btn-primary">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M9.04 15.32l-.36 5.05c.52 0 .75-.22 1.02-.49l2.45-2.34 5.08 3.72c.93.51 1.6.24 1.85-.86l3.36-15.74h.01c.29-1.37-.5-1.9-1.4-1.57L1.46 9.95c-1.34.52-1.32 1.27-.23 1.61l4.93 1.54L17.69 6.6c.54-.36 1.03-.16.62.2L9.04 15.32z"/></svg>
+              Open @{{ bot_username }}
+            </a>
+          </div>
+          <div class="border border-wa-border rounded-xl p-4 bg-wa-bgpanel/40">
+            <div class="text-sm font-medium mb-2">Send test message</div>
+            <p class="text-xs text-wa-muted mb-3">Sends a test to every configured chat ID + every connected subscriber.</p>
+            <form action="/ui/telegram/test" method="post">
+              <button class="btn btn-ghost">
+                <svg class="w-4 h-4"><use href="#i-send"/></svg>Send test
+              </button>
+            </form>
+          </div>
         </div>
-      </div>
+      {% else %}
+        <div class="text-sm text-wa-muted mb-3">
+          Add your bot token below to enable the Telegram bot and unlock the "Connect your Telegram" deeplink.
+        </div>
+      {% endif %}
+
       {% if telegram_test %}
-        <div class="text-sm rounded-lg p-3 {% if telegram_test.ok %}bg-green-50 border border-green-200 text-green-800{% else %}bg-red-50 border border-red-200 text-red-700{% endif %}">
+        <div class="text-sm rounded-lg p-3 mb-4 {% if telegram_test.ok %}bg-green-50 border border-green-200 text-green-800{% else %}bg-red-50 border border-red-200 text-red-700{% endif %}">
           {% if telegram_test.ok %}Test message delivered.{% else %}Telegram test failed.{% endif %}
           <ul class="mt-2 text-xs space-y-0.5">
             {% for r in telegram_test.results or [] %}
@@ -101,7 +134,69 @@
           </ul>
         </div>
       {% endif %}
+
+      {% if subscribers %}
+      <div>
+        <div class="text-xs font-semibold text-wa-muted tracking-wider uppercase mb-2">Connected subscribers ({{ subscribers|length }})</div>
+        <div class="space-y-1.5">
+          {% for sub in subscribers %}
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg border border-wa-border">
+            <div class="w-8 h-8 rounded-full bg-wa-bubble text-wa-dark flex items-center justify-center text-sm font-semibold shrink-0">
+              {{ (sub.first_name or sub.username or '?')[:1]|upper }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm font-medium truncate">{{ sub.first_name or sub.username or sub.chat_id }}</div>
+              <div class="text-[11px] text-wa-muted">{% if sub.username %}@{{ sub.username }} · {% endif %}chat {{ sub.chat_id }}</div>
+            </div>
+            <span class="pill {% if sub.enabled %}pill-ok{% else %}pill-off{% endif %}">{{ 'on' if sub.enabled else 'off' }}</span>
+            <form action="/ui/telegram/subscriber/{{ sub.id }}/toggle" method="post">
+              <button class="btn btn-ghost px-2 py-1 text-xs">{{ 'Pause' if sub.enabled else 'Resume' }}</button>
+            </form>
+            <form action="/ui/telegram/subscriber/{{ sub.id }}/delete" method="post"
+                  onsubmit="return confirm('Disconnect this subscriber?');">
+              <button class="btn btn-ghost px-2 py-1 text-xs text-red-600"><svg class="w-3.5 h-3.5"><use href="#i-trash"/></svg></button>
+            </form>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </div>
+
+    {# ===================== Platform credentials ===================== #}
+    {% for card in platform_cards %}
+      {% set icon, label = platform_meta.get(card.key, ('i-link', card.key)) %}
+      <div class="card p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-9 h-9 rounded-lg {% if card.configured %}bg-wa-bubble text-wa-dark{% else %}bg-wa-bgpanel text-wa-iconfill{% endif %} flex items-center justify-center">
+            <svg class="w-5 h-5"><use href="#{{ icon }}"/></svg>
+          </div>
+          <div class="font-medium">{{ label }}</div>
+          {% if card.configured %}
+            <span class="pill pill-ok ml-auto">ready</span>
+          {% else %}
+            <span class="pill pill-off ml-auto">not set</span>
+          {% endif %}
+        </div>
+        <form action="/ui/settings/save/{{ card.key }}" method="post" class="space-y-2">
+          {% for f in card.fields %}
+            <div>
+              <label class="text-xs text-wa-muted">{{ f.name }}{% if f.is_secret %} <span class="text-[10px] text-wa-muted">(secret)</span>{% endif %}</label>
+              <input class="field font-mono text-xs" name="{{ f.name }}"
+                     type="{{ 'password' if f.is_secret else 'text' }}"
+                     value="{{ '' if f.is_secret else f.value }}"
+                     placeholder="{% if f.is_secret and f.has_value %}•••••••• (unchanged){% else %}{{ f.name }}{% endif %}">
+            </div>
+          {% endfor %}
+          <button class="btn btn-primary w-full" {% if not user %}disabled title="Sign in to edit"{% endif %}>
+            <svg class="w-4 h-4"><use href="#i-check"/></svg>Save {{ label }}
+          </button>
+          {% if not user %}
+          <p class="text-[11px] text-wa-muted text-center">Sign in to edit credentials.</p>
+          {% endif %}
+        </form>
+      </div>
+    {% endfor %}
 
   </div>
 {% endblock %}
