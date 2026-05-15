@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
+from urllib.parse import quote_plus
 
 from sqlalchemy.orm import Session
 
@@ -106,11 +108,47 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
     }
 
 
+def _is_text_clean(text: str) -> bool:
+    """Reject pages whose text looks like binary/garbled/markup soup."""
+    if not text:
+        return False
+    sample = text[:4000]
+    if not sample.strip():
+        return False
+    printable = sum(1 for c in sample if c.isprintable() or c in "\n\t\r")
+    if printable / len(sample) < 0.95:
+        return False
+    alnum = sum(1 for c in sample if c.isalnum())
+    if alnum / len(sample) < 0.45:
+        return False
+    words = [w for w in re.findall(r"[A-Za-z]+", sample) if w]
+    if len(words) < 30:
+        return False
+    avg = sum(len(w) for w in words) / len(words)
+    # Real prose averages roughly 4-6 chars per word; way outside that range
+    # is almost always token salad or stripped markup.
+    if avg < 2.5 or avg > 12:
+        return False
+    return True
+
+
 def _is_post_worthy(entities: dict, text: str) -> bool:
-    """A page is post-worthy when it has at least one structured fact OR is a
-    substantive long-form article."""
+    """A page is post-worthy when it reads like real prose AND has at least
+    one structured fact OR is a substantive long-form article."""
+    if not _is_text_clean(text):
+        return False
     if not entities:
         return len(text) >= 800
+    apply_url = entities.get("apply_url") or ""
+    # Reject drafts whose only "apply" link is a social share button.
+    if apply_url and re.search(
+        r"(?:twitter\.com/intent|x\.com/intent|facebook\.com/(?:sharer|share)|"
+        r"linkedin\.com/(?:sharing|share-offsite)|t\.me/share|wa\.me/|reddit\.com/submit|"
+        r"pinterest\.com/pin/create)",
+        apply_url, re.IGNORECASE,
+    ):
+        entities.pop("apply_url", None)
+        apply_url = ""
     kind = entities.get("kind") or "article"
     if kind != "article":
         return True
@@ -148,13 +186,10 @@ def _pick_cover_image(item, data: dict) -> str:
         bits.append(str(loc))
     title = (data.get("title") or item.title or "")[:80]
     if title:
-        # Keep only alphanumeric words from the title
-        import re as _re
-        words = _re.findall(r"[A-Za-z]{3,}", title)
+        words = re.findall(r"[A-Za-z]{3,}", title)
         bits.extend(words[:4])
     if not bits:
         bits = ["news"]
     # Unsplash Source picks a random topical image — no API key required.
-    from urllib.parse import quote_plus
     query = quote_plus(",".join(b.lower() for b in bits if b)[:120])
     return f"https://source.unsplash.com/1200x630/?{query}"

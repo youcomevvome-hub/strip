@@ -142,13 +142,24 @@ def _heuristic_structure(*, url: str, title: str, text: str, entities: dict) -> 
     apply_url = entities.get("apply_url")
     eligibility = entities.get("eligibility") or []
 
-    # Title: prefix with kind label when meaningful
+    # Title: prefix with kind label only when the title doesn't already imply
+    # the kind. Match plurals (Scholarship/Scholarships), the raw kind word
+    # (e.g. "fellowship"), and common siblings ("grant" implies "Grant").
     base_title = (title or "").strip() or "Opportunity"
     prefix = _KIND_PREFIX.get(kind)
-    if prefix and not re.search(rf"\b{re.escape(prefix)}\b", base_title, re.IGNORECASE):
+    title_implies_kind = False
+    if prefix:
+        pat = rf"\b{re.escape(prefix)}s?\b"
+        if re.search(pat, base_title, re.IGNORECASE):
+            title_implies_kind = True
+        elif kind and re.search(rf"\b{re.escape(kind)}s?\b", base_title, re.IGNORECASE):
+            title_implies_kind = True
+    if prefix and not title_implies_kind:
         nice_title = f"{prefix}: {base_title}"
     else:
         nice_title = base_title
+    # Collapse accidental repeated prefixes like "Scholarship: Scholarship: ..."
+    nice_title = re.sub(r"^(?:([A-Z][a-z]+):\s+)(?:\1:\s+)+", r"\1: ", nice_title)
     nice_title = nice_title[:200]
 
     # Summary: fact-led

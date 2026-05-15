@@ -129,6 +129,31 @@ _APPLY_TEXT_RX = re.compile(
     re.IGNORECASE,
 )
 
+# Hosts that are share/social buttons rather than real apply links.
+_SOCIAL_SHARE_HOSTS = {
+    "twitter.com", "x.com", "facebook.com", "www.facebook.com",
+    "linkedin.com", "www.linkedin.com", "reddit.com", "www.reddit.com",
+    "t.me", "telegram.me", "wa.me", "api.whatsapp.com", "pinterest.com",
+    "www.pinterest.com", "plus.google.com",
+}
+_SOCIAL_SHARE_PATH_RX = re.compile(
+    r"/(intent/tweet|sharer|share|share-offsite|submit)\b", re.IGNORECASE,
+)
+
+
+def _is_social_share_url(url: str) -> bool:
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    host = (p.netloc or "").lower()
+    if host in _SOCIAL_SHARE_HOSTS and _SOCIAL_SHARE_PATH_RX.search(p.path or ""):
+        return True
+    if host in {"twitter.com", "x.com"} and "/intent/" in (p.path or ""):
+        return True
+    return False
+
+
 def find_apply_link(html: str, page_url: str) -> str | None:
     if not html:
         return None
@@ -144,6 +169,8 @@ def find_apply_link(html: str, page_url: str) -> str | None:
         if not href or href.startswith("#") or href.startswith("mailto:") or href.startswith("javascript:"):
             continue
         abs_url = urljoin(page_url, href)
+        if _is_social_share_url(abs_url):
+            continue
         text = " ".join(a.stripped_strings)[:200]
         score = 0
         if _APPLY_TEXT_RX.search(text):
@@ -197,11 +224,16 @@ _CITY_HINT_RX = re.compile(
     r"\b(?:in|at|based\s+in|located\s+in|takes\s+place\s+in|hosted\s+in|location[s]?[:\-])\s+"
     r"([A-Z][A-Za-z]+(?:[\s,][A-Z][A-Za-z]+){0,3})",
 )
-# Avoid noisy capture phrases
-_LOCATION_BLOCKLIST = {
+# Avoid noisy capture phrases. These are common false positives the
+# "in <Word>" pattern picks up when the surrounding text is not a real location.
+_LOCATION_BLOCKLIST = {s.lower() for s in {
     "the", "this", "these", "that", "those", "a", "an", "some",
-    "south africa".title(), "the world".title(),
-}
+    "the world", "the top", "the top of", "the organization", "the field",
+    "the program", "the past", "the future", "the year", "the country",
+    "university", "nutrition", "email", "english", "science", "engineering",
+    "business", "finance", "technology", "history", "medicine",
+    "this post", "this article", "this opportunity", "this scholarship",
+}}
 # Common country/city tail words that confirm a real location
 _LOCATION_TAIL = re.compile(
     r"\b(City|Town|Province|State|Country|UK|USA|US|UAE|EU|Africa|Asia|Europe|"
@@ -217,17 +249,19 @@ def find_location(text: str) -> str | None:
     candidates: list[str] = []
     for m in _CITY_HINT_RX.finditer(text[:4000]):
         cand = m.group(1).strip().rstrip(",.").strip()
-        if not cand or cand.lower() in {b.lower() for b in _LOCATION_BLOCKLIST}:
+        if not cand or cand.lower() in _LOCATION_BLOCKLIST:
             continue
         # drop obvious non-place captures (e.g. "the African Tech")
         first = cand.split()[0]
         if first.lower() in {"the", "an", "a"}:
             continue
         candidates.append(cand)
-    # prefer a candidate that contains a country or admin tail word
+    # Only accept a candidate when it looks like a real place: either it has
+    # a country/admin tail (UK, Africa, ...) or it contains multiple capitalized
+    # tokens (e.g. "Cape Town"). Bare single nouns like "Nutrition" are dropped.
     best = next((c for c in candidates if _LOCATION_TAIL.search(c)), None)
-    if not best and candidates:
-        best = candidates[0]
+    if not best:
+        best = next((c for c in candidates if len(c.split()) >= 2), None)
     parts = []
     if best:
         parts.append(best)
