@@ -44,24 +44,42 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
             items = filtered
     new_count = 0
     drafted = 0
+    redrafted = 0
     skipped_irrelevant = 0
     for it in items:
-        if db.query(Article).filter_by(url=it.url).first():
-            continue
-        article = Article(
-            source_id=source.id,
-            url=it.url,
-            title=it.title[:500],
-            author=it.author,
-            published_at=it.published_at,
-            raw_text=it.text or "",
-            image_url=None,  # we no longer surface photo previews — line icons only
-            entities={},
-            status="pending",
-        )
-        db.add(article)
-        db.flush()
-        new_count += 1
+        existing = db.query(Article).filter_by(url=it.url).first()
+        if existing:
+            # If this article already has a live post (drafted/scheduled/
+            # published), keep skipping. Otherwise re-draft so the user can
+            # review fresh content even when all old posts were rejected.
+            live_post = (
+                db.query(Post)
+                .filter(Post.article_id == existing.id, Post.status.in_(("drafted", "scheduled", "published")))
+                .first()
+            )
+            if live_post:
+                continue
+            article = existing
+            # refresh the text in case scraper improvements yield cleaner content
+            article.raw_text = it.text or article.raw_text
+            article.title = (it.title or article.title)[:500]
+            is_new = False
+        else:
+            article = Article(
+                source_id=source.id,
+                url=it.url,
+                title=it.title[:500],
+                author=it.author,
+                published_at=it.published_at,
+                raw_text=it.text or "",
+                image_url=None,  # we no longer surface photo previews — line icons only
+                entities={},
+                status="pending",
+            )
+            db.add(article)
+            db.flush()
+            new_count += 1
+            is_new = True
         # AI structure + entity extraction
         try:
             data = ai.structure_article(
@@ -93,6 +111,8 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
             db.add(post)
             article.status = "drafted"
             drafted += 1
+            if not is_new:
+                redrafted += 1
         except Exception as e:
             logger.exception("AI failed on %s: %s", it.url, e)
     source.last_scraped_at = datetime.utcnow()
@@ -103,6 +123,7 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
         "matched": matched_by_keyword,
         "new": new_count,
         "drafted": drafted,
+        "redrafted": redrafted,
         "skipped": skipped_irrelevant,
         "keyword_fallback": keyword_fallback_used,
     }
