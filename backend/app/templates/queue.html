@@ -322,80 +322,42 @@
       });
     });
 
-    // ---------------- Publish progress modal ----------------
+    // ---------------- Publish (toast-only, no modal) ----------------
     const PLATFORM_META = {{ platform_meta|tojson }};
 
-    function publishModalEl() {
-      return document.getElementById('publish-modal');
+    function summarizeJob(platforms) {
+      if (!platforms) return '';
+      const keys = Object.keys(platforms);
+      const ok = keys.filter(k => platforms[k].status === 'ok');
+      const err = keys.filter(k => platforms[k].status === 'error');
+      if (err.length && !ok.length) return 'Publish failed: ' + err.join(', ');
+      if (ok.length && err.length) return 'Published to ' + ok.join(', ') + ' (failed: ' + err.join(', ') + ')';
+      if (ok.length) return 'Published to ' + ok.join(', ');
+      return 'Publishing…';
     }
-    function openPublishModal(postId, title, platformsObj) {
-      const back = publishModalEl();
-      document.getElementById('publish-modal-title').textContent = title || ('Post #' + postId);
-      const list = document.getElementById('publish-modal-list');
-      list.innerHTML = Object.keys(platformsObj).map(function(k) {
-        const meta = PLATFORM_META[k] || [null, k];
-        const ps = platformsObj[k];
-        return renderRow(k, meta[1], ps);
-      }).join('');
-      back.dataset.postId = postId;
-      back.classList.remove('hidden');
-      back.classList.add('flex');
-      pollPublishStatus(postId);
-    }
-    function renderRow(plat, label, ps) {
-      let icon, color;
-      if (ps.status === 'ok') { icon = '✔'; color = 'text-green-600'; }
-      else if (ps.status === 'error') { icon = '✕'; color = 'text-red-600'; }
-      else if (ps.status === 'running') { icon = '<span class="inline-block w-4 h-4 border-2 border-wa-green border-t-transparent rounded-full animate-spin"></span>'; color = 'text-wa-green'; }
-      else { icon = '○'; color = 'text-wa-muted'; }
-      const url = ps.url ? `<a class="text-xs text-wa-link hover:underline ml-2" href="${ps.url}" target="_blank" rel="noopener">view</a>` : '';
-      const err = ps.error ? `<div class="text-[11px] text-red-600 mt-1">${escapeHtml(ps.error)}</div>` : '';
-      return `<div class="flex items-start justify-between gap-3 px-3 py-2 rounded-lg border border-wa-border" data-plat="${plat}">
-        <div class="min-w-0 flex-1">
-          <div class="text-sm font-medium">${label}</div>
-          ${err}
-        </div>
-        <div class="flex items-center gap-2 ${color}">
-          <span class="text-base">${icon}</span>${url}
-        </div>
-      </div>`;
-    }
-    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-    function closePublishModal() {
-      const back = publishModalEl();
-      back.classList.add('hidden');
-      back.classList.remove('flex');
-    }
-    let pollTimer = null;
-    async function pollPublishStatus(postId) {
-      if (pollTimer) clearTimeout(pollTimer);
-      try {
-        const r = await fetch(`/ui/posts/${postId}/publish/status`);
-        const j = await r.json();
-        // Refresh rows
-        const list = document.getElementById('publish-modal-list');
-        if (list && j.platforms) {
-          list.innerHTML = Object.keys(j.platforms).map(function(k) {
-            const meta = PLATFORM_META[k] || [null, k];
-            return renderRow(k, meta[1], j.platforms[k]);
-          }).join('');
-        }
-        // Footer state
-        const foot = document.getElementById('publish-modal-foot');
-        if (j.state === 'done') {
-          foot.innerHTML = `<button onclick="closePublishModal();location.href='/ui/posts'" class="btn btn-primary">Done — go to Published</button>
-            <button onclick="closePublishModal();location.href='/ui/queue'" class="btn btn-ghost">Close</button>`;
-        } else {
-          foot.innerHTML = `<span class="text-xs text-wa-muted">Publishing in background. You can close this and the job will keep running.</span>
-            <button onclick="closePublishModal()" class="btn btn-ghost">Hide</button>`;
-          pollTimer = setTimeout(() => pollPublishStatus(postId), 1500);
-        }
-      } catch (e) {
-        pollTimer = setTimeout(() => pollPublishStatus(postId), 3000);
+
+    async function trackPublishJob(postId, title) {
+      // Quietly poll the status endpoint and surface the final result as a toast.
+      for (let i = 0; i < 60; i++) {
+        try {
+          const r = await fetch(`/ui/posts/${postId}/publish/status`);
+          const j = await r.json();
+          if (j.state === 'done') {
+            const msg = summarizeJob(j.platforms) || 'Published';
+            const kind = Object.values(j.platforms || {}).some(p => p.status === 'error')
+                          && !Object.values(j.platforms).some(p => p.status === 'ok') ? 'err' : null;
+            if (window.toast) toast((title ? '“' + title + '” — ' : '') + msg, kind);
+            // Remove the now-published card from the queue.
+            const card = document.querySelector('article.card[data-post-id="' + postId + '"]');
+            if (card) card.remove();
+            return;
+          }
+        } catch (e) { /* keep polling */ }
+        await new Promise(res => setTimeout(res, 1500));
       }
     }
 
-    // Hijack publish forms — submit via fetch, then open the progress modal.
+    // Hijack publish forms — submit via fetch, show toasts only.
     document.querySelectorAll('form.publish-form').forEach(function(form) {
       form.addEventListener('submit', function(ev) {
         // Allow the "Reject" button to use its own formaction (not publish).
@@ -405,11 +367,7 @@
         const fd = new FormData(form);
         const postId = form.dataset.postId;
         const title = form.dataset.postTitle;
-        const selected = fd.getAll('platforms');
-        const platsInit = {};
-        (selected.length ? selected : ['rss']).forEach(p => platsInit[p] = {status: 'pending'});
         if (window.toast) toast('Publishing “' + (title || 'post') + '”…');
-        openPublishModal(postId, title, platsInit);
         fetch(form.action, {
           method: 'POST',
           body: fd,
@@ -417,7 +375,9 @@
         }).then(r => {
           if (r.status === 401) {
             r.json().then(j => { location.href = j.next || '/ui/signin'; });
+            return;
           }
+          trackPublishJob(postId, title);
         }).catch(() => { if (window.toast) toast('Publish request failed', 'err'); });
       });
     });
@@ -459,7 +419,6 @@
       btnRej.addEventListener('click', async function() {
         const ids = selected();
         if (!ids.length) return;
-        if (!confirm('Reject ' + ids.length + ' post(s)?')) return;
         const fd = new FormData();
         ids.forEach(i => fd.append('ids', String(i)));
         btnRej.disabled = true;
@@ -470,7 +429,6 @@
           });
           const j = await r.json().catch(() => ({}));
           if (window.toast) toast('Rejected ' + (j.rejected || ids.length) + ' post(s)');
-          // Remove rejected cards from view
           ids.forEach(i => {
             const card = document.querySelector('article.card[data-post-id="' + i + '"]');
             if (card) card.remove();
@@ -507,8 +465,13 @@
             return;
           }
           const j = await r.json().catch(() => ({}));
-          const n = (j.started || []).length;
-          if (window.toast) toast('Started ' + n + ' publish job(s)');
+          const started = j.started || [];
+          if (window.toast) toast('Started ' + started.length + ' publish job(s)');
+          started.forEach(pid => {
+            const card = document.querySelector('article.card[data-post-id="' + pid + '"]');
+            const title = card ? (card.querySelector('.font-semibold')?.textContent?.trim() || '') : '';
+            trackPublishJob(pid, title);
+          });
         } catch (e) {
           if (window.toast) toast('Bulk publish failed', 'err');
         } finally {
@@ -519,30 +482,12 @@
       refresh();
     })();
 
-    // Resume any active jobs on page load.
+    // Resume any active jobs on page load — just track them via toasts.
     const ACTIVE_JOBS = {{ (active_jobs or {})|tojson }};
     Object.keys(ACTIVE_JOBS).forEach(function(pid) {
       const form = document.querySelector(`form.publish-form[data-post-id="${pid}"]`);
       const title = form ? form.dataset.postTitle : ('Post #' + pid);
-      openPublishModal(pid, title, ACTIVE_JOBS[pid].platforms);
+      trackPublishJob(pid, title);
     });
   </script>
-
-  <!-- Publish progress modal -->
-  <div id="publish-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/40 p-4"
-       onclick="if(event.target===this) closePublishModal()">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-wa-border">
-        <div class="min-w-0">
-          <div class="text-xs text-wa-muted">Publishing</div>
-          <div id="publish-modal-title" class="font-semibold truncate"></div>
-        </div>
-        <button class="text-wa-muted hover:text-wa-text" onclick="closePublishModal()">
-          <svg class="w-5 h-5"><use href="#i-x"/></svg>
-        </button>
-      </div>
-      <div class="p-4 space-y-2" id="publish-modal-list"></div>
-      <div class="px-5 py-3 border-t border-wa-border flex items-center justify-end gap-2" id="publish-modal-foot"></div>
-    </div>
-  </div>
 {% endblock %}
