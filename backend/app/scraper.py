@@ -46,10 +46,10 @@ _DEFAULT_HEADERS = {
 TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 
 # Crawl tuning
-MAX_DEPTH = 2          # depth 0 = seed URL, 1 = its links, 2 = links from those
-MAX_PAGES = 60         # hard cap on total pages fetched per source
-MAX_KEEP = 25          # max relevant items returned
-PER_PAGE_LINK_FANOUT = 25
+MAX_DEPTH = 3          # depth 0 = seed URL, 1 = its links, 2 = links from those
+MAX_PAGES = 120        # hard cap on total pages fetched per source
+MAX_KEEP = 40          # max relevant items returned
+PER_PAGE_LINK_FANOUT = 40
 
 # Signals that strongly suggest the page is "post-worthy"
 _RELEVANCE_KEYWORDS = re.compile(
@@ -65,10 +65,18 @@ _RELEVANCE_URL_RX = re.compile(
     r"competition|deadline|call-for|programme|program/)",
     re.IGNORECASE,
 )
+# Pages we never want to fetch. NOTE: category/ and page/N are NOT skipped
+# anymore — those are exactly the listing pages we need for pagination.
 _SKIP_URL_RX = re.compile(
     r"/(login|signin|signup|register-account|cart|checkout|terms|privacy|"
-    r"cookie|contact|about|tag/|tags/|category/|categories/|author/|page/\d+|"
-    r"wp-admin|wp-login|feed/|comments/|search\?)",
+    r"cookie|contact-us|about-us|tag/|tags/|author/|"
+    r"wp-admin|wp-login|feed/?$|comments/|trackback|search\?)",
+    re.IGNORECASE,
+)
+# Listing/index pages that should be crawled for links but NOT turned into
+# posts themselves.
+_LISTING_URL_RX = re.compile(
+    r"/(category|categories|tag|tags|page|topics?|section)/",
     re.IGNORECASE,
 )
 
@@ -171,16 +179,21 @@ def scrape_http(url: str, *, max_pages: int = MAX_PAGES, max_keep: int = MAX_KEE
 
             # Always try extraction; some listing pages still contain enough
             # structured content to become good drafts after AI processing.
-            item = _extract_article(current, html)
-            if item:
-                if _is_relevant(item):
-                    kept.append(item)
-                else:
-                    fallback_candidates.append(item)
+            is_listing = bool(_LISTING_URL_RX.search(current))
+            if not is_listing:
+                item = _extract_article(current, html)
+                if item:
+                    if _is_relevant(item):
+                        kept.append(item)
+                    else:
+                        fallback_candidates.append(item)
 
             # Enqueue same-host children (relevant-looking URLs first)
             if depth < MAX_DEPTH:
                 children = _discover_links(current, html, seed_host, PER_PAGE_LINK_FANOUT)
+                # Always try the next pagination page of a listing too
+                if is_listing:
+                    children.extend(_paginate_next(current))
                 children.sort(key=lambda u: -_url_relevance_score(u))
                 for child in children:
                     if child not in seen:
@@ -210,7 +223,36 @@ def _url_relevance_score(u: str) -> int:
     p = urlparse(u).path.lower()
     if re.search(r"/[a-z0-9]+(?:-[a-z0-9]+){2,}", p):
         s += 1
+    # mildly prefer crawling deeper paginated listings
+    if re.search(r"/page/\d+", p):
+        s += 1
     return s
+
+
+_PAGINATION_RX = re.compile(r"^(.*/)page/(\d+)/?$", re.IGNORECASE)
+
+
+def _paginate_next(url: str) -> list[str]:
+    """Given a listing URL, return likely next-page URLs to seed the crawl.
+
+    Works for both seed listing pages (no /page/ yet) and already-paginated
+    pages (/page/2/ -> /page/3/). Caps at /page/5/ per origin to bound work.
+    """
+    p = urlparse(url)
+    path = p.path or "/"
+    m = _PAGINATION_RX.match(path)
+    if m:
+        base, n = m.group(1), int(m.group(2))
+        out = []
+        for k in range(n + 1, n + 3):  # next 2 pages
+            if k > 6:
+                break
+            out.append(f"{p.scheme}://{p.netloc}{base}page/{k}/")
+        return out
+    # not yet paginated — try /page/2..5/
+    if not path.endswith("/"):
+        path = path + "/"
+    return [f"{p.scheme}://{p.netloc}{path}page/{k}/" for k in (2, 3, 4, 5)]
 
 
 def _discover_links(base_url: str, html: str, seed_host: str, limit: int) -> list[str]:
@@ -431,14 +473,28 @@ def scrape_source(*, url: str, rss_url: str | None, mode: str) -> list[ScrapedIt
         return scrape_http(url)
     if mode == "playwright":
         return scrape_playwright(url)
-    # auto: try RSS first (discover if missing) -> HTTP crawl -> Playwright
+    # auto: RSS gives the freshest 10-20 items; HTTP crawl with pagination
+    # finds the rest. Merge both, dedupe by URL, RSS items kept first because
+    # they carry author/published metadata.
     if not rss_url:
         rss_url = discover_rss(url)
+    items: list[ScrapedItem] = []
+    seen_urls: set[str] = set()
     if rss_url:
-        items = scrape_rss(rss_url)
-        if items:
-            return items
-    items = scrape_http(url)
+        try:
+            for it in scrape_rss(rss_url):
+                if it.url not in seen_urls:
+                    seen_urls.add(it.url)
+                    items.append(it)
+        except Exception as e:
+            logger.warning("RSS failed for %s: %s", rss_url, e)
+    try:
+        for it in scrape_http(url):
+            if it.url not in seen_urls:
+                seen_urls.add(it.url)
+                items.append(it)
+    except Exception as e:
+        logger.warning("HTTP crawl failed for %s: %s", url, e)
     if items:
         return items
     return scrape_playwright(url)

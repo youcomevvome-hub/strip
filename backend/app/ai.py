@@ -184,7 +184,7 @@ def _heuristic_structure(*, url: str, title: str, text: str, entities: dict) -> 
         if len(extra_bullets) >= 4:
             break
 
-    # Body: lead with the facts, then add the text
+    # Body: lead with the facts, then add the text as clean paragraphs.
     body_lines: list[str] = []
     if kind != "article":
         body_lines.append(f"**{prefix or kind.title()} opportunity**")
@@ -198,7 +198,10 @@ def _heuristic_structure(*, url: str, title: str, text: str, entities: dict) -> 
     if apply_url:                        fact_lines.append(f"- **Apply:** {apply_url}")
     if fact_lines:
         body_lines.append("\n".join(fact_lines))
-    body_lines.append(text[:1400])
+    # Pull the first few real paragraphs/sentences from the article body.
+    paragraphs = _clean_paragraphs(text, limit_chars=1800, max_paragraphs=6)
+    if paragraphs:
+        body_lines.append("\n\n".join(paragraphs))
     if eligibility:
         body_lines.append("**Eligibility**\n" + "\n".join(f"- {e}" for e in eligibility[:6]))
     body_md = "\n\n".join(body_lines)
@@ -362,6 +365,55 @@ def _as_list(x) -> list[str]:
 def _first_sentences(text: str, n: int) -> str:
     sents = re.split(r"(?<=[.!?])\s+", (text or "").strip())
     return " ".join(sents[:n])
+
+
+# Common navigation/boilerplate noise lines we strip from extracted text
+# before turning it into a post body.
+_NOISE_LINE_RX = re.compile(
+    r"^(?:share(?:\s+this)?|tweet|pin\s*it|email|print|read\s+more|"
+    r"continue\s+reading|click\s+here|advert(?:isement)?|cookie\s+policy|"
+    r"subscribe|sign\s+up|follow\s+us|related\s+(?:posts|articles)|"
+    r"comments?|leave\s+a\s+reply|tags?:|categor(?:y|ies):|"
+    r"posted\s+by|by\s+[a-z\s]{2,40}\s+on\s+\d|©.*|"
+    r"home\s*[>/]|navigation|menu|search|skip\s+to\s+content)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _clean_paragraphs(text: str, *, limit_chars: int = 1800, max_paragraphs: int = 6) -> list[str]:
+    """Turn extracted article text into a clean ordered list of paragraphs:
+    drop nav/boilerplate, drop very short fragments, dedupe, cap length."""
+    if not text:
+        return []
+    raw_blocks = re.split(r"\n\s*\n+", text.strip())
+    out: list[str] = []
+    seen: set[str] = set()
+    total = 0
+    for block in raw_blocks:
+        # collapse internal whitespace and split paragraphs on hard line breaks
+        # that look like list/menu lines.
+        block = re.sub(r"[ \t]+", " ", block).strip()
+        if not block:
+            continue
+        # If the block is one long line, treat it as a paragraph; otherwise
+        # treat each line as a candidate (catches sites whose extractor joins
+        # menu items into one block).
+        candidates = block.split("\n") if "\n" in block else [block]
+        for cand in candidates:
+            c = cand.strip(" \u2022\u00b7-\u2013\u2014\t")
+            if len(c) < 40:
+                continue
+            if _NOISE_LINE_RX.match(c):
+                continue
+            key = c.lower()[:120]
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+            total += len(c)
+            if len(out) >= max_paragraphs or total >= limit_chars:
+                return out
+    return out
 
 
 # ------------- markdown -> safe HTML (no external deps) -------------
