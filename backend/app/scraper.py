@@ -143,6 +143,7 @@ def scrape_http(url: str, *, max_pages: int = MAX_PAGES, max_keep: int = MAX_KEE
     """
     seen: set[str] = set()
     kept: list[ScrapedItem] = []
+    fallback_candidates: list[ScrapedItem] = []
     seed_host = urlparse(url).netloc.lower()
 
     queue: deque[tuple[str, int]] = deque([(url, 0)])
@@ -166,11 +167,14 @@ def scrape_http(url: str, *, max_pages: int = MAX_PAGES, max_keep: int = MAX_KEE
                 continue
             html = r.text
 
-            # Try to extract this page as an article
-            if depth > 0 or _looks_like_article(html):
-                item = _extract_article(current, html)
-                if item and _is_relevant(item):
+            # Always try extraction; some listing pages still contain enough
+            # structured content to become good drafts after AI processing.
+            item = _extract_article(current, html)
+            if item:
+                if _is_relevant(item):
                     kept.append(item)
+                else:
+                    fallback_candidates.append(item)
 
             # Enqueue same-host children (relevant-looking URLs first)
             if depth < MAX_DEPTH:
@@ -179,7 +183,15 @@ def scrape_http(url: str, *, max_pages: int = MAX_PAGES, max_keep: int = MAX_KEE
                 for child in children:
                     if child not in seen:
                         queue.append((child, depth + 1))
-    return kept
+    if kept:
+        return kept
+
+    # Fallback: if relevance rules are too strict for a site, return the best
+    # extracted pages by body length instead of returning an empty list.
+    if fallback_candidates:
+        fallback_candidates.sort(key=lambda it: len(it.text or ""), reverse=True)
+        return fallback_candidates[: min(max_keep, 8)]
+    return []
 
 
 def _looks_like_article(html: str) -> bool:
@@ -229,9 +241,14 @@ def _discover_links(base_url: str, html: str, seed_host: str, limit: int) -> lis
 
 def _extract_article(url: str, html: str) -> ScrapedItem | None:
     text = trafilatura.extract(html, include_comments=False, include_tables=False) or ""
+    if len(text) < 120:
+        # Fallback extractor for sites where trafilatura misses article text.
+        soup_fb = BeautifulSoup(html, "lxml")
+        paras = [p.get_text(" ", strip=True) for p in soup_fb.find_all("p")]
+        text = "\n".join(p for p in paras if len(p) >= 30)
     soup = BeautifulSoup(html, "lxml")
     title = (soup.title.string.strip() if soup.title and soup.title.string else url)
-    if len(text) < 200:
+    if len(text) < 120:
         return None
     image_url = _extract_cover_image(soup, url)
     return ScrapedItem(url=url, title=title[:500], text=text, html=html, image_url=image_url)

@@ -15,21 +15,31 @@ logger = logging.getLogger(__name__)
 
 def run_pipeline_for_source(db: Session, source: Source) -> dict:
     logger.info("scraping %s (%s)", source.name, source.url)
-    items = scraper.scrape_source(
+    raw_items = scraper.scrape_source(
         url=source.url, rss_url=source.rss_url, mode=source.scrape_mode,
     )
+    items = list(raw_items)
     # Per-source keyword filter: only keep items whose title + text matches at
     # least one of the source's comma-separated keywords (when configured).
     kw_raw = (source.keywords or "").strip()
     keywords = [k.strip().lower() for k in kw_raw.split(",") if k.strip()] if kw_raw else []
+    matched_by_keyword = len(items)
+    keyword_fallback_used = False
     if keywords:
         filtered = []
         for it in items:
             hay = ((it.title or "") + " " + (it.text or "")).lower()
             if any(k in hay for k in keywords):
                 filtered.append(it)
+        matched_by_keyword = len(filtered)
         logger.info("keyword filter on %s: %d -> %d items", source.name, len(items), len(filtered))
-        items = filtered
+        # If keywords are too strict for this run, keep a small fallback slice
+        # so scraping still produces reviewable drafts instead of hard-zero.
+        if not filtered and items:
+            keyword_fallback_used = True
+            items = items[: min(5, len(items))]
+        else:
+            items = filtered
     new_count = 0
     drafted = 0
     skipped_irrelevant = 0
@@ -87,10 +97,12 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
     db.commit()
     return {
         "source_id": source.id,
-        "fetched": len(items),
+        "fetched": len(raw_items),
+        "matched": matched_by_keyword,
         "new": new_count,
         "drafted": drafted,
         "skipped": skipped_irrelevant,
+        "keyword_fallback": keyword_fallback_used,
     }
 
 
