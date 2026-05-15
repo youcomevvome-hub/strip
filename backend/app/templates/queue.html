@@ -103,6 +103,18 @@
             </div>
           </div>
           <div>
+            <label class="text-xs text-wa-muted">Cover image URL</label>
+            <div class="flex gap-2 items-start">
+              {% if p.cover_image_url %}
+              <img src="{{ p.cover_image_url }}" alt=""
+                   class="w-20 h-20 rounded-md object-cover border border-wa-border shrink-0"
+                   onerror="this.style.display='none'">
+              {% endif %}
+              <input class="field flex-1" name="cover_image_url" value="{{ p.cover_image_url or '' }}"
+                     placeholder="https://… (paste any image URL, blank = auto)">
+            </div>
+          </div>
+          <div>
             <label class="text-xs text-wa-muted">Summary</label>
             <textarea class="field" name="summary" rows="2">{{ p.summary or '' }}</textarea>
           </div>

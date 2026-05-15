@@ -90,6 +90,9 @@ def _coerce(d: dict, *, url: str, title: str, text: str) -> dict:
     # AI may return either Markdown or HTML; convert markdown-ish to HTML, then sanitize.
     if "<" not in raw_body or not re.search(r"</?[a-zA-Z]+", raw_body):
         raw_body = _md_to_html(raw_body)
+    else:
+        # Even if HTML, AI often leaves stray **bold** / *italic* markers inside.
+        raw_body = _apply_inline_md(raw_body)
     body_html = sanitize_html(raw_body)
     return {
         "title": (d.get("title") or title)[:200],
@@ -397,11 +400,30 @@ def _md_to_html(md: str) -> str:
     _flush_list()
 
     html_out = "\n".join(out_blocks)
-    # Inline markdown: **bold**, *italic*, links, autolinks
-    html_out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", html_out)
-    html_out = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", html_out)
-    html_out = _URL_RX.sub(r'<a href="\1" target="_blank" rel="noopener">\1</a>', html_out)
+    html_out = _apply_inline_md(html_out)
     return html_out
+
+
+def _apply_inline_md(s: str) -> str:
+    """Run inline-markdown conversions (bold/italic/autolink) and strip any orphan
+    asterisk markers that AI output may leave behind."""
+    if not s:
+        return s
+    # ***bold-italic*** first
+    s = re.sub(r"\*\*\*([^*\n]+)\*\*\*", r"<strong><em>\1</em></strong>", s)
+    s = re.sub(r"\*\*([^*\n]+)\*\*", r"<strong>\1</strong>", s)
+    s = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?!\w)", r"<em>\1</em>", s)
+    # Drop any leftover lone or paired asterisks that didn't form a pair.
+    s = re.sub(r"\*+", "", s)
+    # Drop leading markdown bullet hyphens that escaped paragraph-mode (e.g. "- foo" inside <p>).
+    s = re.sub(r"(<p>)\s*[-\u2022]\s+", r"\1", s)
+    # Autolink bare URLs (skip ones already inside an href="...")
+    def _link(m: re.Match) -> str:
+        url = m.group(1)
+        return f'<a href="{url}" target="_blank" rel="noopener">{url}</a>'
+    # Quick guard: only autolink URLs not immediately preceded by =" (already in attribute) or >.
+    s = re.sub(r'(?<!["=>])(https?://[^\s<>\)\]"]+)', _link, s)
+    return s
 
 
 # ------------- HTML sanitiser for user-saved bodies (Quill output) -------------

@@ -73,6 +73,7 @@ def run_pipeline_for_source(db: Session, source: Source) -> dict:
                 hashtags=data["hashtags"],
                 links=data["links"] or [it.url],
                 image_url=None,
+                cover_image_url=_pick_cover_image(it, data),
                 variants=data["variants"],
                 entities=entities,
                 status="drafted",
@@ -114,3 +115,34 @@ def run_pipeline_all() -> list[dict]:
         return [run_pipeline_for_source(db, s) for s in sources]
     finally:
         db.close()
+
+
+def _pick_cover_image(item, data: dict) -> str:
+    """Use the scraped page's og:image when present, otherwise build a topical
+    Unsplash Source URL from entities/title so every post gets a hero image."""
+    if getattr(item, "image_url", None):
+        return item.image_url
+    ent = (data.get("entities") or {})
+    kind = (ent.get("kind") or "article").lower()
+    # Build a short, descriptive query string for Unsplash.
+    bits: list[str] = []
+    if kind and kind != "article":
+        bits.append(kind)
+    org = ent.get("organization")
+    if org:
+        bits.append(str(org))
+    loc = ent.get("location")
+    if loc:
+        bits.append(str(loc))
+    title = (data.get("title") or item.title or "")[:80]
+    if title:
+        # Keep only alphanumeric words from the title
+        import re as _re
+        words = _re.findall(r"[A-Za-z]{3,}", title)
+        bits.extend(words[:4])
+    if not bits:
+        bits = ["news"]
+    # Unsplash Source picks a random topical image — no API key required.
+    from urllib.parse import quote_plus
+    query = quote_plus(",".join(b.lower() for b in bits if b)[:120])
+    return f"https://source.unsplash.com/1200x630/?{query}"

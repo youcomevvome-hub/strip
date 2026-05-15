@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -33,6 +34,7 @@ SESSION_COOKIE = "strip_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
 
 ui_router = APIRouter(include_in_schema=False)
+logger = logging.getLogger(__name__)
 
 
 def _favicon(url: str) -> str:
@@ -328,6 +330,11 @@ async def post_save(pid: int, request: Request, db: Session = Depends(get_db)):
     p.body = sanitize_html(form.get("body", p.body) or "")
     p.bullets = [b.strip() for b in (form.get("bullets", "") or "").split("\n") if b.strip()]
     p.hashtags = [h.lstrip("#").lower() for h in (form.get("hashtags", "") or "").split() if h.strip()]
+    new_cover = (form.get("cover_image_url") or "").strip()
+    if new_cover:
+        p.cover_image_url = new_cover[:1000]
+    elif "cover_image_url" in form:
+        p.cover_image_url = None
     variants = dict(p.variants or {})
     for key in ["twitter", "linkedin", "facebook", "instagram", "whatsapp",
                 "telegram", "discord", "mastodon", "reddit_title", "reddit_body"]:
@@ -424,6 +431,24 @@ def post_delete(pid: int, request: Request, db: Session = Depends(get_db)):
     if p:
         db.delete(p)
         db.commit()
+    referer = request.headers.get("referer") or "/ui/blog"
+    return RedirectResponse(referer, status_code=303)
+
+
+@ui_router.post("/ui/posts/{pid}/telegram")
+def post_publish_telegram(pid: int, request: Request, db: Session = Depends(get_db)):
+    """Publish a single post to all configured Telegram chats."""
+    from . import social
+    p = db.get(Post, pid)
+    if not p:
+        raise HTTPException(404)
+    try:
+        social.post_telegram(p)
+        if p.status == "drafted":
+            p.status = "published"
+            db.commit()
+    except Exception as e:
+        logger.exception("telegram publish failed for post %s: %s", pid, e)
     referer = request.headers.get("referer") or "/ui/blog"
     return RedirectResponse(referer, status_code=303)
 

@@ -233,7 +233,33 @@ def _extract_article(url: str, html: str) -> ScrapedItem | None:
     title = (soup.title.string.strip() if soup.title and soup.title.string else url)
     if len(text) < 200:
         return None
-    return ScrapedItem(url=url, title=title[:500], text=text, html=html)
+    image_url = _extract_cover_image(soup, url)
+    return ScrapedItem(url=url, title=title[:500], text=text, html=html, image_url=image_url)
+
+
+def _extract_cover_image(soup: BeautifulSoup, base_url: str) -> str | None:
+    """Pull the best cover image: og:image > twitter:image > first big <img>."""
+    for sel in [
+        ("meta", {"property": "og:image"}),
+        ("meta", {"property": "og:image:url"}),
+        ("meta", {"name": "twitter:image"}),
+        ("meta", {"name": "twitter:image:src"}),
+        ("link", {"rel": "image_src"}),
+    ]:
+        tag = soup.find(*sel)
+        if tag:
+            v = tag.get("content") or tag.get("href")
+            if v:
+                return urljoin(base_url, v.strip())
+    # Fallback: first <img> with a reasonable size hint
+    for img in soup.find_all("img", src=True):
+        src = img["src"].strip()
+        if not src or src.startswith("data:"):
+            continue
+        if any(src.lower().endswith(ext) for ext in (".svg", ".gif")):
+            continue
+        return urljoin(base_url, src)
+    return None
 
 
 def _is_relevant(item: ScrapedItem) -> bool:

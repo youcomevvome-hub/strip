@@ -263,29 +263,60 @@ def post_telegram(post: Post, content: str) -> dict:
     if len(message) > 3800:
         message = message[:3800] + "..."
 
-    photo = post.cover_image_url
+    photo = _resolve_photo_url(post.cover_image_url)
     try:
         sent: list[str] = []
         last_err = None
         for chat in chats:
+            ok = False
             if photo:
                 url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendPhoto"
                 payload = {"chat_id": chat, "photo": photo,
                            "caption": message[:1000], "parse_mode": "HTML"}
-            else:
+                r = httpx.post(url, json=payload, timeout=30)
+                if r.status_code < 300:
+                    sent.append(chat)
+                    ok = True
+                else:
+                    last_err = f"{chat}: sendPhoto {r.status_code} {r.text[:200]}"
+            if not ok:
+                # Fall back to text message if no photo or photo upload failed.
                 url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
                 payload = {"chat_id": chat, "text": message,
                            "parse_mode": "HTML", "disable_web_page_preview": False}
-            r = httpx.post(url, json=payload, timeout=30)
-            if r.status_code >= 300:
-                last_err = f"{chat}: {r.status_code} {r.text[:200]}"
-                continue
-            sent.append(chat)
+                r = httpx.post(url, json=payload, timeout=30)
+                if r.status_code >= 300:
+                    last_err = f"{chat}: sendMessage {r.status_code} {r.text[:200]}"
+                    continue
+                if chat not in sent:
+                    sent.append(chat)
         if not sent:
             return _err(last_err or "failed")
         return _ok(",".join(sent))
     except Exception as e:
         return _err(str(e))
+
+
+def _resolve_photo_url(url: str | None) -> str | None:
+    """Telegram's sendPhoto follows a single redirect but trips on some hosts
+    (Unsplash Source returns 302 to a CDN host with required headers). We
+    pre-resolve to a direct image URL and reject anything that's not a real
+    image so the publisher can fall back to text gracefully."""
+    if not url:
+        return None
+    if url.startswith("/uploads/"):
+        # Local upload — Telegram cannot fetch this from the public internet, skip.
+        return None
+    try:
+        with httpx.Client(timeout=10, follow_redirects=True) as client:
+            r = client.head(url)
+            final = str(r.url)
+            ct = r.headers.get("content-type", "")
+            if "image" in ct.lower():
+                return final
+    except Exception:
+        return None
+    return None
 
 
 def telegram_send_test(text: str = "Strip is connected.") -> dict:
