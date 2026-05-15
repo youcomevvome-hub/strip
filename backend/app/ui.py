@@ -11,6 +11,8 @@ from pathlib import Path
 from urllib.parse import quote_plus, urlparse
 import logging
 import secrets
+import threading
+import time
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -22,7 +24,7 @@ from . import social
 from .ai import sanitize_html
 from .auth import hash_password, verify_password
 from .config import get_settings
-from .db import get_db
+from .db import get_db, SessionLocal
 from .models import Article, Delivery, Post, Source, User
 from .pipeline import run_pipeline_all, run_pipeline_for_source
 
@@ -32,6 +34,13 @@ settings = get_settings()
 signer = URLSafeTimedSerializer(settings.SECRET_KEY, salt="strip-session")
 SESSION_COOKIE = "strip_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days
+
+# ---------------- publish job tracking (in-memory) ----------------
+# Maps post_id -> {"state": "running"|"done", "started": ts, "finished": ts|None,
+#                   "platforms": {plat: {"status": "pending"|"running"|"ok"|"error",
+#                                          "error": str|None, "url": str|None}}}
+PUBLISH_JOBS: dict[int, dict] = {}
+_JOB_LOCK = threading.Lock()
 
 ui_router = APIRouter(include_in_schema=False)
 logger = logging.getLogger(__name__)
@@ -321,8 +330,18 @@ def sources_scrape_all():
 @ui_router.get("/ui/queue", response_class=HTMLResponse)
 def queue_page(request: Request, db: Session = Depends(get_db)):
     posts = db.query(Post).filter_by(status="drafted").order_by(Post.created_at.desc()).all()
+    # Snapshot active publish jobs so the UI can resume the progress modal.
+    with _JOB_LOCK:
+        active_jobs = {
+            pid: {
+                "state": j["state"],
+                "platforms": {k: dict(v) for k, v in j["platforms"].items()},
+            }
+            for pid, j in PUBLISH_JOBS.items()
+            if j["state"] == "running" or (j.get("finished") and time.time() - j["finished"] < 30)
+        }
     return templates.TemplateResponse(
-        "queue.html", _ctx(request, db, posts=posts),
+        "queue.html", _ctx(request, db, posts=posts, active_jobs=active_jobs),
     )
 
 
@@ -370,34 +389,118 @@ async def post_publish(pid: int, request: Request, db: Session = Depends(get_db)
         raise HTTPException(404)
     form = await request.form()
     platforms = form.getlist("platforms") or ["rss"]
+    # Drop unknown platforms early
+    platforms = [pl for pl in platforms if pl in social.PUBLISHERS]
+    if not platforms:
+        platforms = ["rss"]
 
     # Anyone can publish to the local RSS feed; real social platforms require sign-in.
     needs_auth = any(plat != "rss" for plat in platforms)
     if needs_auth and _current_user(request, db) is None:
+        if _wants_json(request):
+            return JSONResponse({"error": "auth_required", "next": "/ui/signin?next=/ui/queue"}, status_code=401)
         return RedirectResponse("/ui/signin?next=/ui/queue", status_code=303)
 
-    any_ok = False
-    for plat in platforms:
-        if plat not in social.PUBLISHERS:
-            continue
-        result = social.publish_to(plat, p)
-        d = Delivery(
-            post_id=p.id, platform=plat,
-            status=result["status"],
-            external_id=result.get("external_id"),
-            external_url=result.get("external_url"),
-            error=result.get("error"),
-            delivered_at=datetime.utcnow() if result["status"] == "ok" else None,
-        )
-        db.add(d)
-        if result["status"] == "ok":
-            any_ok = True
-    if any_ok:
-        p.status = "published"
-        if p.article:
-            p.article.status = "published"
-    db.commit()
-    return RedirectResponse("/ui/posts", status_code=303)
+    # If a job is already running for this post, just return its state.
+    with _JOB_LOCK:
+        existing = PUBLISH_JOBS.get(pid)
+        if existing and existing.get("state") == "running":
+            if _wants_json(request):
+                return JSONResponse(existing)
+            return RedirectResponse("/ui/queue", status_code=303)
+
+        job = {
+            "post_id": pid,
+            "state": "running",
+            "started": time.time(),
+            "finished": None,
+            "platforms": {plat: {"status": "pending", "error": None, "url": None} for plat in platforms},
+        }
+        PUBLISH_JOBS[pid] = job
+
+    # Kick off worker thread — it must use its own DB session.
+    threading.Thread(target=_publish_worker, args=(pid, list(platforms)), daemon=True).start()
+
+    if _wants_json(request):
+        return JSONResponse(job)
+    return RedirectResponse(f"/ui/queue?publishing={pid}", status_code=303)
+
+
+def _wants_json(request: Request) -> bool:
+    """Return True if the client is doing an AJAX/fetch request."""
+    accept = (request.headers.get("accept") or "").lower()
+    xrw = (request.headers.get("x-requested-with") or "").lower()
+    return "application/json" in accept or xrw == "fetch"
+
+
+def _publish_worker(pid: int, platforms: list[str]) -> None:
+    """Run each platform publisher sequentially, updating PUBLISH_JOBS as we go.
+    Each platform that succeeds writes a Delivery row; first success marks the
+    post as published. Continues through the list even if some platforms fail."""
+    db = SessionLocal()
+    try:
+        p = db.get(Post, pid)
+        if p is None:
+            with _JOB_LOCK:
+                PUBLISH_JOBS[pid]["state"] = "done"
+                PUBLISH_JOBS[pid]["finished"] = time.time()
+            return
+        any_ok = False
+        for plat in platforms:
+            with _JOB_LOCK:
+                PUBLISH_JOBS[pid]["platforms"][plat]["status"] = "running"
+            try:
+                result = social.publish_to(plat, p)
+            except Exception as e:  # noqa - publisher should not crash worker
+                logger.exception("publisher %s crashed for post %s", plat, pid)
+                result = {"status": "error", "error": str(e)}
+            d = Delivery(
+                post_id=p.id, platform=plat,
+                status=result["status"],
+                external_id=result.get("external_id"),
+                external_url=result.get("external_url"),
+                error=result.get("error"),
+                delivered_at=datetime.utcnow() if result["status"] == "ok" else None,
+            )
+            db.add(d)
+            db.commit()
+            with _JOB_LOCK:
+                PUBLISH_JOBS[pid]["platforms"][plat] = {
+                    "status": result["status"],
+                    "error": result.get("error"),
+                    "url": result.get("external_url"),
+                }
+            if result["status"] == "ok":
+                any_ok = True
+                if p.status != "published":
+                    p.status = "published"
+                    if p.article:
+                        p.article.status = "published"
+                    db.commit()
+        with _JOB_LOCK:
+            PUBLISH_JOBS[pid]["state"] = "done"
+            PUBLISH_JOBS[pid]["finished"] = time.time()
+            PUBLISH_JOBS[pid]["any_ok"] = any_ok
+    finally:
+        db.close()
+
+
+@ui_router.get("/ui/posts/{pid}/publish/status")
+def post_publish_status(pid: int):
+    """JSON: progress of a publish job. Returns {state: 'idle'} when no job exists."""
+    with _JOB_LOCK:
+        job = PUBLISH_JOBS.get(pid)
+        if not job:
+            return JSONResponse({"post_id": pid, "state": "idle", "platforms": {}})
+        # Return a shallow copy so the client sees a consistent snapshot.
+        return JSONResponse({
+            "post_id": pid,
+            "state": job["state"],
+            "started": job.get("started"),
+            "finished": job.get("finished"),
+            "any_ok": job.get("any_ok", False),
+            "platforms": {k: dict(v) for k, v in job["platforms"].items()},
+        })
 
 
 # ---------------- posts history ----------------

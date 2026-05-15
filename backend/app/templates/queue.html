@@ -157,7 +157,7 @@
         </form>
 
         <div class="border-t border-wa-border p-4 bg-wa-bgpanel/40">
-          <form action="/ui/posts/{{ p.id }}/publish" method="post" class="space-y-3">
+          <form action="/ui/posts/{{ p.id }}/publish" method="post" class="space-y-3 publish-form" data-post-id="{{ p.id }}" data-post-title="{{ p.title }}">
             <div class="text-xs font-semibold text-wa-muted tracking-wider uppercase">Publish to</div>
             <div class="flex flex-wrap gap-2">
               {% for plat in platforms %}
@@ -250,5 +250,130 @@
         hidden.value = quill.root.innerHTML;
       });
     });
+
+    // ---------------- Publish progress modal ----------------
+    const PLATFORM_META = {{ platform_meta|tojson }};
+
+    function publishModalEl() {
+      return document.getElementById('publish-modal');
+    }
+    function openPublishModal(postId, title, platformsObj) {
+      const back = publishModalEl();
+      document.getElementById('publish-modal-title').textContent = title || ('Post #' + postId);
+      const list = document.getElementById('publish-modal-list');
+      list.innerHTML = Object.keys(platformsObj).map(function(k) {
+        const meta = PLATFORM_META[k] || [null, k];
+        const ps = platformsObj[k];
+        return renderRow(k, meta[1], ps);
+      }).join('');
+      back.dataset.postId = postId;
+      back.classList.remove('hidden');
+      back.classList.add('flex');
+      pollPublishStatus(postId);
+    }
+    function renderRow(plat, label, ps) {
+      let icon, color;
+      if (ps.status === 'ok') { icon = '✔'; color = 'text-green-600'; }
+      else if (ps.status === 'error') { icon = '✕'; color = 'text-red-600'; }
+      else if (ps.status === 'running') { icon = '<span class="inline-block w-4 h-4 border-2 border-wa-green border-t-transparent rounded-full animate-spin"></span>'; color = 'text-wa-green'; }
+      else { icon = '○'; color = 'text-wa-muted'; }
+      const url = ps.url ? `<a class="text-xs text-wa-link hover:underline ml-2" href="${ps.url}" target="_blank" rel="noopener">view</a>` : '';
+      const err = ps.error ? `<div class="text-[11px] text-red-600 mt-1">${escapeHtml(ps.error)}</div>` : '';
+      return `<div class="flex items-start justify-between gap-3 px-3 py-2 rounded-lg border border-wa-border" data-plat="${plat}">
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-medium">${label}</div>
+          ${err}
+        </div>
+        <div class="flex items-center gap-2 ${color}">
+          <span class="text-base">${icon}</span>${url}
+        </div>
+      </div>`;
+    }
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+    function closePublishModal() {
+      const back = publishModalEl();
+      back.classList.add('hidden');
+      back.classList.remove('flex');
+    }
+    let pollTimer = null;
+    async function pollPublishStatus(postId) {
+      if (pollTimer) clearTimeout(pollTimer);
+      try {
+        const r = await fetch(`/ui/posts/${postId}/publish/status`);
+        const j = await r.json();
+        // Refresh rows
+        const list = document.getElementById('publish-modal-list');
+        if (list && j.platforms) {
+          list.innerHTML = Object.keys(j.platforms).map(function(k) {
+            const meta = PLATFORM_META[k] || [null, k];
+            return renderRow(k, meta[1], j.platforms[k]);
+          }).join('');
+        }
+        // Footer state
+        const foot = document.getElementById('publish-modal-foot');
+        if (j.state === 'done') {
+          foot.innerHTML = `<button onclick="closePublishModal();location.href='/ui/posts'" class="btn btn-primary">Done — go to Published</button>
+            <button onclick="closePublishModal();location.href='/ui/queue'" class="btn btn-ghost">Close</button>`;
+        } else {
+          foot.innerHTML = `<span class="text-xs text-wa-muted">Publishing in background. You can close this and the job will keep running.</span>
+            <button onclick="closePublishModal()" class="btn btn-ghost">Hide</button>`;
+          pollTimer = setTimeout(() => pollPublishStatus(postId), 1500);
+        }
+      } catch (e) {
+        pollTimer = setTimeout(() => pollPublishStatus(postId), 3000);
+      }
+    }
+
+    // Hijack publish forms — submit via fetch, then open the progress modal.
+    document.querySelectorAll('form.publish-form').forEach(function(form) {
+      form.addEventListener('submit', function(ev) {
+        // Allow the "Reject" button to use its own formaction (not publish).
+        const submitter = ev.submitter;
+        if (submitter && submitter.getAttribute('formaction')) return;
+        ev.preventDefault();
+        const fd = new FormData(form);
+        const postId = form.dataset.postId;
+        const title = form.dataset.postTitle;
+        const selected = fd.getAll('platforms');
+        const platsInit = {};
+        (selected.length ? selected : ['rss']).forEach(p => platsInit[p] = {status: 'pending'});
+        openPublishModal(postId, title, platsInit);
+        fetch(form.action, {
+          method: 'POST',
+          body: fd,
+          headers: {'X-Requested-With': 'fetch', 'Accept': 'application/json'},
+        }).then(r => {
+          if (r.status === 401) {
+            r.json().then(j => { location.href = j.next || '/ui/signin'; });
+          }
+        }).catch(() => {});
+      });
+    });
+
+    // Resume any active jobs on page load.
+    const ACTIVE_JOBS = {{ (active_jobs or {})|tojson }};
+    Object.keys(ACTIVE_JOBS).forEach(function(pid) {
+      const form = document.querySelector(`form.publish-form[data-post-id="${pid}"]`);
+      const title = form ? form.dataset.postTitle : ('Post #' + pid);
+      openPublishModal(pid, title, ACTIVE_JOBS[pid].platforms);
+    });
   </script>
+
+  <!-- Publish progress modal -->
+  <div id="publish-modal" class="hidden fixed inset-0 z-50 items-center justify-center bg-black/40 p-4"
+       onclick="if(event.target===this) closePublishModal()">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-wa-border">
+        <div class="min-w-0">
+          <div class="text-xs text-wa-muted">Publishing</div>
+          <div id="publish-modal-title" class="font-semibold truncate"></div>
+        </div>
+        <button class="text-wa-muted hover:text-wa-text" onclick="closePublishModal()">
+          <svg class="w-5 h-5"><use href="#i-x"/></svg>
+        </button>
+      </div>
+      <div class="p-4 space-y-2" id="publish-modal-list"></div>
+      <div class="px-5 py-3 border-t border-wa-border flex items-center justify-end gap-2" id="publish-modal-foot"></div>
+    </div>
+  </div>
 {% endblock %}
